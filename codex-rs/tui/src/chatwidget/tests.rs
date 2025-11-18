@@ -2828,3 +2828,47 @@ fn chatwidget_tall() {
     .unwrap();
     assert_snapshot!(term.backend().vt100().screen().contents());
 }
+
+// --- Blackbox snapshot tests ---
+// These tests treat the ChatWidget as a black box, sending input through
+// public interfaces and verifying rendered output matches expected snapshots.
+
+/// Blackbox test: type "hello" into the composer and snapshot the result.
+#[test]
+fn blackbox_typing_snapshot() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    // Set text in the composer (simulating typing)
+    chat.bottom_pane.set_composer_text("hello".to_string());
+
+    // Render to a test terminal
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("create terminal");
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw chat with typed text");
+
+    assert_snapshot!("blackbox_typing_hello", terminal.backend());
+}
+
+/// Blackbox test: open the /model picker and snapshot the result.
+#[test]
+fn blackbox_model_picker_snapshot() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual();
+
+    // Open the model picker popup
+    chat.open_model_popup();
+
+    // Render to a test terminal
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("create terminal");
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw chat with model picker");
+
+    assert_snapshot!("blackbox_model_picker_open", terminal.backend());
+}
