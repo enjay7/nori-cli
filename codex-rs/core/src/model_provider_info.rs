@@ -307,6 +307,8 @@ pub const DEFAULT_OLLAMA_PORT: u16 = 11434;
 
 pub const LMSTUDIO_OSS_PROVIDER_ID: &str = "lmstudio";
 pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
+pub const BUILT_IN_OSS_MODEL_PROVIDER_ID: &str = "oss";
+pub const GEMINI_ACP_PROVIDER_ID: &str = "gemini-acp";
 
 /// Built-in default provider list.
 pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
@@ -364,6 +366,41 @@ pub fn built_in_model_providers() -> HashMap<String, ModelProviderInfo> {
         (
             LMSTUDIO_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_LMSTUDIO_PORT, WireApi::Responses),
+        ),
+        (
+            BUILT_IN_OSS_MODEL_PROVIDER_ID,
+            create_oss_provider(1234u16, WireApi::Responses),
+        ),
+        (
+            OLLAMA_OSS_PROVIDER_ID,
+            create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Chat),
+        ),
+        (
+            LMSTUDIO_OSS_PROVIDER_ID,
+            create_oss_provider(DEFAULT_LMSTUDIO_PORT, WireApi::Responses),
+        ),
+        // Gemini ACP provider for Gemini CLI agents via subprocess
+        (
+            GEMINI_ACP_PROVIDER_ID,
+            P {
+                name: "Gemini ACP".into(),
+                // ACP agents communicate via subprocess, not HTTP
+                base_url: None,
+                env_key: Some("GOOGLE_API_KEY".into()),
+                env_key_instructions: Some(
+                    "Get your API key from https://aistudio.google.com/app/apikey".into(),
+                ),
+                experimental_bearer_token: None,
+                // ACP uses its own protocol, not HTTP-based wire APIs
+                wire_api: WireApi::Chat,
+                query_params: None,
+                http_headers: None,
+                env_http_headers: None,
+                request_max_retries: None,
+                stream_max_retries: None,
+                stream_idle_timeout_ms: None,
+                requires_openai_auth: false,
+            },
         ),
     ]
     .into_iter()
