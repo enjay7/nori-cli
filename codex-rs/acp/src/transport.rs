@@ -51,6 +51,21 @@ impl<W: AsyncWrite + Unpin, R: AsyncRead + Unpin> StdioTransport<W, R> {
         self.stdout.read_line(&mut line).await?;
         Ok(line)
     }
+
+    /// Write raw JSON string to stdin (for custom request handling)
+    pub async fn write_raw(&mut self, json: &str) -> Result<()> {
+        self.stdin.write_all(json.as_bytes()).await?;
+        self.stdin.write_all(b"\n").await?;
+        self.stdin.flush().await?;
+        Ok(())
+    }
+
+    /// Read a single line from stdout
+    pub async fn read_line(&mut self) -> Result<String> {
+        let mut line = String::new();
+        self.stdout.read_line(&mut line).await?;
+        Ok(line)
+    }
 }
 
 #[cfg(test)]

@@ -154,6 +154,11 @@ impl AgentProcess {
     pub async fn get_stderr_lines(&self) -> Vec<String> {
         self.stderr_lines.lock().await.clone()
     }
+
+    /// Get mutable access to the transport layer
+    pub fn transport_mut(&mut self) -> &mut StdioTransport<ChildStdin, ChildStdout> {
+        &mut self.transport
+    }
 }
 
 #[cfg(test)]
