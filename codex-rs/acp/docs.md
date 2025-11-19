@@ -6,66 +6,99 @@ Path: @/codex-rs/acp
 
 - Implements Agent Context Protocol (ACP) for Codex to communicate with external AI agent subprocesses
 - Provides JSON-RPC 2.0-based IPC over stdin/stdout pipes
+- Includes `AcpModelClient` for high-level streaming interaction with ACP agents
 - Manages agent lifecycle, initialization handshake, and stderr capture for diagnostic logging
 
 ### How it fits into the larger codebase
 
 - Used by `@/codex-rs/core/src/client.rs` to spawn and communicate with ACP-compliant agents
+- `AcpModelClient` is designed to mirror the `ModelClient` interface for future core integration
 - Enables Codex to delegate AI operations to external providers (Claude, Gemini, etc.) that implement the ACP specification
 - Complements the existing OpenAI-style API path in core by providing an alternative subprocess-based agent model
+- Uses channel-based streaming pattern (mpsc) consistent with core's `ResponseStream`
 - Provides structured error handling via JSON-RPC error responses that core translates to user-facing messages
 - TUI and other clients can access captured stderr for displaying agent diagnostic output
 
 ### Core Implementation
 
-**Entry Point:** `AgentProcess::spawn()` in `@/codex-rs/acp/src/agent.rs`
+**High-Level API:** `AcpModelClient::stream()` in `@/codex-rs/acp/src/acp_client.rs`
+
+- Encapsulates the full flow: spawn, initialize, session/new, session/prompt, stream notifications, complete
+- Returns an `AcpStream` implementing the futures `Stream` trait for async iteration
+- Events are delivered via `AcpEvent` enum: `TextDelta`, `ReasoningDelta`, `Completed`, `Error`
+- Uses mpsc channel (capacity 16) for backpressure-aware event delivery
+
+**Low-Level Entry Point:** `AgentProcess::spawn()` in `@/codex-rs/acp/src/agent.rs`
 
 - Creates a tokio subprocess with piped stdin/stdout/stderr
 - Spawns a detached tokio task to asynchronously read stderr lines into a thread-safe buffer
+- Exposes `transport_mut()` for direct transport access when streaming notifications
 
-**Protocol Flow:**
+**Protocol Flow (via AcpModelClient):**
 
 ```
-Client              AgentProcess                Agent Subprocess
-  |                      |                            |
-  |--- spawn() --------->|--- Command::spawn() ------>|
-  |                      |                            |
-  |--- initialize() ---->|--- JSON-RPC request ------>|
-  |                      |<-- JSON-RPC response ------|
-  |                      |                            |
-  |--- send_request() -->|--- JSON-RPC request ------>|
-  |                      |<-- JSON-RPC response ------|
+AcpModelClient                AgentProcess                Agent Subprocess
+     |                             |                            |
+     |--- spawn agent ------------>|--- Command::spawn() ------>|
+     |                             |                            |
+     |--- initialize() ----------->|--- JSON-RPC "initialize" ->|
+     |                             |<-- JSON-RPC response ------|
+     |                             |                            |
+     |--- session/new ------------>|--- JSON-RPC request ------>|
+     |                             |<-- sessionId response -----|
+     |                             |                            |
+     |--- session/prompt --------->|--- JSON-RPC request ------>|
+     |                             |<-- session/update notif ---|  (TextDelta)
+     |                             |<-- session/update notif ---|  (TextDelta)
+     |                             |<-- JSON-RPC response ------|
+     |                             |                            |
+     |--- kill() ----------------->|--- SIGKILL --------------->|
 ```
 
 **Key Components:**
 
+- `AcpModelClient` in `@/codex-rs/acp/src/acp_client.rs` - High-level client for streaming prompt responses
+- `AcpStream` in `@/codex-rs/acp/src/acp_client.rs` - Futures-compatible stream wrapping mpsc receiver
 - `StdioTransport` in `@/codex-rs/acp/src/transport.rs` - Serializes/deserializes JSON-RPC messages over async streams
-- `JsonRpcRequest/Response` in `@/codex-rs/acp/src/protocol.rs` - Protocol data structures
+- `JsonRpcRequest/Response/Notification` in `@/codex-rs/acp/src/protocol.rs` - Protocol data structures
 - `AcpSession` in `@/codex-rs/acp/src/session.rs` - Session state management placeholder
 
 ### Things to Know
 
+**Streaming Notification Pattern:**
+
+The `stream_prompt()` function handles interleaved messages from the agent:
+- Uses `write_raw()` and `read_line()` for direct transport access during streaming
+- Distinguishes responses (have `id`, no `method`) from notifications (have `method`)
+- Processes `session/update` notifications with `sessionUpdate` types: `agent_message_chunk` and `agent_thought_chunk`
+- Loops until a JSON-RPC response is received, then extracts `stopReason` and sends `Completed` event
+
+**Session Lifecycle:**
+
+Each `AcpModelClient::stream()` call spawns a fresh agent process:
+- Agent is initialized with hardcoded capabilities: `fs.readTextFile`, `fs.writeTextFile`, `terminal`
+- Session created via `session/new` with `cwd` and empty `mcpServers`
+- Prompt sent via `session/prompt` with text content block format
+- Agent is killed after stream completes or errors
+
 **Stderr Capture Implementation:**
 
 - Buffer uses `Arc<Mutex<Vec<String>>>` for thread-safe access between reader task and caller
-- Bounded at 500 lines (`STDERR_BUFFER_CAPACITY`) with FIFO eviction when full
-- Individual lines truncated to 10KB (`STDERR_LINE_MAX_LENGTH`)
-- Access via `agent.get_stderr_lines().await` which clones the current buffer
+- Bounded at 500 lines with FIFO eviction when full
+- Individual lines truncated to 10KB
 - Reader task runs until EOF or error, logging warnings via tracing
 
-**Why stderr was changed from inherit to piped:**
+**Transport Layer Extensions:**
 
-Per ACP specification, agents "MAY write UTF-8 strings to stderr for logging purposes" and clients "MAY capture, forward, or ignore this logging". Previous `Stdio::inherit()` sent stderr directly to terminal, making it inaccessible programmatically.
-
-**Threading model:**
-
-The stderr reader task is fire-and-forget (spawned via `tokio::spawn` without joining). It terminates naturally when the subprocess exits and stderr closes.
+`StdioTransport` includes low-level methods for streaming:
+- `write_raw(&str)` - Write JSON string directly to stdin
+- `read_line()` - Read single line from stdout
+- Used by `stream_prompt()` for notification-aware communication
 
 **Test coverage:**
 
-- Unit tests in `agent.rs` use shell commands to test basic capture, empty stderr, buffer overflow (600 lines), and line truncation
-- Integration tests in `@/codex-rs/acp/tests/integration.rs` test stderr capture with the actual mock-acp-agent binary
-- `test_gemini_acp_handshake` in integration tests verifies Gemini CLI ACP handshake works correctly (skips if npx unavailable)
-- Core-level tests in `@/codex-rs/core/tests/suite/acp_gemini.rs` test `stream_acp` flow with both mock and Gemini agents
+- Thin slice integration tests in `@/codex-rs/acp/tests/thin_slice.rs` verify end-to-end streaming with mock agent
+- Unit tests in `agent.rs` use shell commands to test stderr capture, buffer overflow, and line truncation
+- Integration tests in `@/codex-rs/acp/tests/integration.rs` test with actual mock-acp-agent binary
 
 Created and maintained by Nori.

@@ -156,11 +156,11 @@ impl acp::Agent for MockAgent {
         let session_id = arguments.session_id.clone();
 
         // Support configurable stderr output for testing stderr capture
-        if let Ok(count_str) = std::env::var("MOCK_AGENT_STDERR_COUNT") {
-            if let Ok(count) = count_str.parse::<usize>() {
-                for i in 0..count {
-                    eprintln!("MOCK_AGENT_STDERR_LINE:{}", i);
-                }
+        if let Ok(count_str) = std::env::var("MOCK_AGENT_STDERR_COUNT")
+            && let Ok(count) = count_str.parse::<usize>()
+        {
+            for i in 0..count {
+                eprintln!("MOCK_AGENT_STDERR_LINE:{}", i);
             }
         }
 

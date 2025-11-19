@@ -27,11 +27,7 @@ async fn test_thin_slice_text_streaming() {
     let binary_path = mock_agent_binary_path();
 
     // Create AcpModelClient
-    let client = AcpModelClient::new(
-        binary_path,
-        vec![],
-        PathBuf::from("/tmp"),
-    );
+    let client = AcpModelClient::new(binary_path, vec![], PathBuf::from("/tmp"));
 
     // Stream a simple prompt
     let stream = client
@@ -45,20 +41,20 @@ async fn test_thin_slice_text_streaming() {
         .expect("Stream timed out");
 
     // Verify we got at least one text delta
-    let has_text_delta = events.iter().any(|event| {
-        match event {
-            Ok(codex_acp::AcpEvent::TextDelta(_)) => true,
-            _ => false,
-        }
+    let has_text_delta = events.iter().any(|event| match event {
+        Ok(codex_acp::AcpEvent::TextDelta(_)) => true,
+        _ => false,
     });
-    assert!(has_text_delta, "Expected at least one TextDelta event, got: {:?}", events);
+    assert!(
+        has_text_delta,
+        "Expected at least one TextDelta event, got: {:?}",
+        events
+    );
 
     // Verify stream completed
-    let has_completed = events.iter().any(|event| {
-        match event {
-            Ok(codex_acp::AcpEvent::Completed { .. }) => true,
-            _ => false,
-        }
+    let has_completed = events.iter().any(|event| match event {
+        Ok(codex_acp::AcpEvent::Completed { .. }) => true,
+        _ => false,
     });
     assert!(has_completed, "Expected Completed event, got: {:?}", events);
 }

@@ -2,8 +2,8 @@
 //!
 //! Provides AcpModelClient for communicating with ACP-compliant agent subprocesses.
 
-use crate::protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use crate::AgentProcess;
+use crate::protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use anyhow::{Context, Result};
 use futures::Stream;
 use serde_json::{Value, json};
@@ -21,9 +21,7 @@ pub enum AcpEvent {
     /// Reasoning/thought delta
     ReasoningDelta(String),
     /// Stream completed
-    Completed {
-        stop_reason: String,
-    },
+    Completed { stop_reason: String },
     /// Error during streaming
     Error(String),
 }
@@ -164,9 +162,7 @@ async fn run_session(
         .to_string();
 
     // Send completed event
-    tx.send(Ok(AcpEvent::Completed { stop_reason }))
-        .await
-        .ok();
+    tx.send(Ok(AcpEvent::Completed { stop_reason })).await.ok();
 
     Ok(())
 }
@@ -245,7 +241,9 @@ async fn process_session_update(params: Value, tx: &mpsc::Sender<Result<AcpEvent
         }
         Some("agent_thought_chunk") => {
             if let Some(text) = update.get("content").and_then(extract_text_content) {
-                let _ = tx.send(Ok(AcpEvent::ReasoningDelta(text.to_string()))).await;
+                let _ = tx
+                    .send(Ok(AcpEvent::ReasoningDelta(text.to_string())))
+                    .await;
             }
         }
         _ => {
