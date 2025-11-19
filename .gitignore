@@ -85,3 +85,11 @@ CHANGELOG.ignore.md
 # nix related
 .direnv
 .envrc
+
+# git worktrees
+.worktree/
+.worktrees/
+/codex-rs/tui/target/
+/nori-cli
+/target
+
