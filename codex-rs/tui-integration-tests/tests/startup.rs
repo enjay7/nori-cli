@@ -1,3 +1,4 @@
+use insta::assert_snapshot;
 use std::time::{Duration, Instant};
 use tui_integration_tests::{SessionConfig, TuiSession};
 
@@ -22,6 +23,7 @@ fn test_startup_shows_welcome() {
     let contents = session.screen_contents();
     assert!(contents.contains("Welcome to Codex"));
     assert!(contents.contains("/tmp/"));
+    assert_snapshot!("startup_shows_welcome", session.screen_contents());
 }
 
 #[test]
@@ -43,6 +45,7 @@ fn test_startup_welcome_with_dimensions() {
     // Verify terminal size is respected
     let contents = session.screen_contents();
     assert!(contents.lines().count() <= 40);
+    assert_snapshot!("startup_welcome_dimensions_40x120", session.screen_contents());
 }
 
 #[test]
@@ -76,6 +79,7 @@ fn test_runs_in_temp_directory_by_default() {
         "Session should not run in home directory, but got: {}",
         contents
     );
+    assert_snapshot!("runs_in_temp_directory", session.screen_contents());
 }
 
 #[test]
@@ -102,6 +106,7 @@ fn test_trust_screen_is_skipped_with_default_config() {
         "Should show main prompt with context indicator, got: {}",
         contents
     );
+    assert_snapshot!("trust_screen_skipped", session.screen_contents());
 }
 
 #[test]

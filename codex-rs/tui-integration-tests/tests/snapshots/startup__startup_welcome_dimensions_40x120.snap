@@ -1,0 +1,32 @@
+---
+source: tui-integration-tests/tests/startup.rs
+expression: session.screen_contents()
+---
+                                      
+             _._:=++==+,_             
+         _=,/*\+/+\=||=_ _"+_         
+       ,|*|+**"^`   `"*`"~=~||+       
+      ;*_\*',,_            /*|;|,     
+     \^;/'^|\`\\            ".|\\,    
+    ~* +`  |*/;||,           '.\||,   
+   +^"-*    '\|*/"|_          ! |/|   
+   ||_|`     ,//|;|*            "`|   
+   |=~'`    ;||^\|".~++++++_+, =" |   
+    _~;*  _;+` /* |"|___.:,,,|/,/,|   
+    \^_"^ ^\,./`   `^*''* ^*"/,;_/    
+     *^, ", `              ,'/*_|     
+       ^\,`\+_          _=_+|_+"      
+         ^*,\_!*+:;=;;.=*+_,|*        
+           `*"*|~~___,_;+*"           
+                                      
+
+  Welcome to Codex, OpenAI's command-line coding agent
+
+> You are running Codex in /tmp/.tmpiqIraE
+
+  Since this folder is not version controlled, we recommend requiring approval of all edits and commands.
+
+  1. Allow Codex to work in this folder without asking for approval
+› 2. Require approval of edits and commands
+
+  Press enter to continue

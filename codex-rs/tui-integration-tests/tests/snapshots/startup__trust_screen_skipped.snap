@@ -1,0 +1,7 @@
+---
+source: tui-integration-tests/tests/startup.rs
+expression: session.screen_contents()
+---
+› Improve documentation in @filename
+
+  100% context left · ? for shortcuts
