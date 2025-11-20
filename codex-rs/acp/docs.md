@@ -100,5 +100,6 @@ Each `AcpModelClient::stream()` call spawns a fresh agent process:
 - Thin slice integration tests in `@/codex-rs/acp/tests/thin_slice.rs` verify end-to-end streaming with mock agent
 - Unit tests in `agent.rs` use shell commands to test stderr capture, buffer overflow, and line truncation
 - Integration tests in `@/codex-rs/acp/tests/integration.rs` test with actual mock-acp-agent binary
+- TUI black-box tests in `@/codex-rs/tui-integration-tests` exercise full application flow including ACP protocol
 
 Created and maintained by Nori.

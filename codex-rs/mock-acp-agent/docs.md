@@ -11,6 +11,7 @@ Path: @/codex-rs/mock-acp-agent
 ### How it fits into the larger codebase
 
 - Used by integration tests in `@/codex-rs/acp/tests/integration.rs` to test ACP protocol flow
+- Used by TUI black-box tests in `@/codex-rs/tui-integration-tests` as the `--model mock-acp-agent` backend
 - Enables end-to-end testing of `AgentProcess` without requiring real AI providers
 - Produces diagnostic stderr output that tests use to verify stderr capture functionality
 - Not shipped in production; exists solely for development and CI testing
@@ -51,6 +52,8 @@ Path: @/codex-rs/mock-acp-agent
 | `MOCK_AGENT_REQUEST_FILE` | Reads file path via client during prompt |
 | `MOCK_AGENT_STREAM_UNTIL_CANCEL` | Continuously streams until cancel notification |
 | `MOCK_AGENT_STDERR_COUNT` | Emits N lines of `MOCK_AGENT_STDERR_LINE:{i}` to stderr during prompt |
+| `MOCK_AGENT_RESPONSE` | Custom response text instead of default "Test message 1/2" (added for TUI testing) |
+| `MOCK_AGENT_DELAY_MS` | Millisecond delay before completing stream to simulate realistic streaming (added for TUI testing) |
 
 **Stderr Output for Testing:**
 

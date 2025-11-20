@@ -1,0 +1,136 @@
+# Noridoc: TUI Integration Tests
+
+Path: @/codex-rs/tui-integration-tests
+
+### Overview
+
+- Black-box integration testing framework for the Codex TUI using PTY (pseudo-terminal) emulation
+- Spawns the real `codex` binary in a simulated terminal and exercises full application stack
+- Uses VT100 parser to capture and validate terminal screen output via snapshot testing
+- Provides programmatic keyboard input simulation and screen state polling
+
+### How it fits into the larger codebase
+
+- Tests the complete integration between `@/codex-rs/cli`, `@/codex-rs/tui`, `@/codex-rs/core`, and `@/codex-rs/acp`
+- Complements unit tests in `@/codex-rs/tui/src/chatwidget.rs` by testing full application behavior
+- Uses `@/codex-rs/mock-acp-agent` as the ACP backend for deterministic test scenarios
+- Validates CLI argument parsing, TUI event loop, ACP protocol communication, and terminal rendering
+- Part of the workspace at `@/codex-rs/Cargo.toml:46`
+
+### Core Implementation
+
+**Test Harness:** `TuiSession` in `@/codex-rs/tui-integration-tests/src/lib.rs`
+
+The main API provides:
+- `spawn(rows, cols)` - Launch codex binary with mock-acp-agent in PTY
+- `spawn_with_config(rows, cols, config)` - Launch with custom environment variables
+- `send_str(text)` - Simulate typing text
+- `send_key(key)` - Send keyboard events (Enter, Escape, Ctrl-C, etc.)
+- `wait_for_text(needle, timeout)` - Poll screen until text appears
+- `wait_for(predicate, timeout)` - Poll screen until condition matches
+- `screen_contents()` - Get current terminal screen as string
+
+**Architecture:**
+
+```
+Test Code
+    ↓
+TuiSession (portable_pty)
+    ↓
+PTY Master ←→ PTY Slave
+    ↓           ↓
+VT100 Parser   codex binary (--model mock-acp-agent)
+    ↓           ↓
+Screen State   ACP JSON-RPC over stdin/stdout
+                ↓
+            mock_acp_agent (env var configured)
+```
+
+**Key Input Handling:** `Key` enum in `@/codex-rs/tui-integration-tests/src/keys.rs`
+
+Converts high-level key events to ANSI escape sequences:
+- `Key::Enter` → `\r`
+- `Key::Escape` → `\x1b`
+- `Key::Up/Down/Left/Right` → `\x1b[A/B/D/C`
+- `Key::Backspace` → `\x7f`
+- `Key::Ctrl('c')` → Control character encoding
+
+**Session Configuration:** `SessionConfig` in `@/codex-rs/tui-integration-tests/src/lib.rs`
+
+Builder pattern for test environment setup:
+- `with_mock_response(text)` - Set `MOCK_AGENT_RESPONSE` env var
+- `with_stream_until_cancel()` - Set `MOCK_AGENT_STREAM_UNTIL_CANCEL=1`
+- `with_agent_env(key, value)` - Pass custom env vars to mock agent
+
+### Things to Know
+
+**Test Files Structure:**
+
+| File | Coverage |
+|------|----------|
+| `@/codex-rs/tui-integration-tests/tests/startup.rs` | TUI initialization and prompt display |
+| `@/codex-rs/tui-integration-tests/tests/prompt_flow.rs` | Prompt submission and agent responses |
+| `@/codex-rs/tui-integration-tests/tests/input_handling.rs` | Text editing, backspace, Ctrl-C clearing |
+| `@/codex-rs/tui-integration-tests/tests/cancellation.rs` | Stream cancellation with Escape key |
+
+**Snapshot Testing with Insta:**
+
+Tests use `insta::assert_snapshot!()` to capture terminal output:
+```rust
+assert_snapshot!("startup_screen", session.screen_contents());
+```
+
+Snapshots stored in `@/codex-rs/tui-integration-tests/snapshots/*.snap` for regression detection.
+
+**PTY Implementation Details:**
+
+- Uses `portable-pty` crate for cross-platform PTY support
+- Sets `TERM=xterm-256color` for terminal feature detection
+- NO_COLOR=1 by default for deterministic output parsing
+- Terminal size configurable (default 24x80, some tests use 40x120)
+
+**Polling Pattern:**
+
+`poll()` method attempts non-blocking read from PTY master:
+- Reads up to 8KB buffer per poll
+- Feeds data to VT100 parser incrementally
+- Returns immediately on WouldBlock (no data available)
+- `wait_for()` loops with 50ms sleep between polls
+
+**Mock Agent Integration:**
+
+Tests control mock agent behavior via environment variables:
+- `MOCK_AGENT_RESPONSE` - Custom response text instead of defaults
+- `MOCK_AGENT_DELAY_MS` - Simulate streaming delays
+- `MOCK_AGENT_STREAM_UNTIL_CANCEL` - Stream until Escape pressed
+
+See `@/codex-rs/mock-acp-agent/docs.md` for full list of env vars.
+
+**Binary Discovery:**
+
+`codex_binary_path()` locates the compiled binary:
+```
+test_exe: target/debug/deps/startup-abc123
+          ↓
+target/debug/deps (parent)
+          ↓
+target/debug (parent.parent)
+          ↓
+target/debug/codex (join "codex")
+```
+
+**Known Limitations:**
+
+Tests currently fail due to cursor position query issue:
+- Crossterm tries to query cursor position via ANSI escape `\x1b[6n`
+- PTY emulator doesn't respond to cursor position requests
+- Requires either: test mode flag in TUI code, enhanced PTY emulator, or headless CLI flag
+
+**Dependencies:**
+
+- `portable-pty = "0.8"` - PTY creation and management
+- `vt100 = "0.15"` - Terminal emulator/parser
+- `insta = "1"` - Snapshot testing framework
+- `anyhow = "1"` - Error handling
+
+Created and maintained by Nori.
