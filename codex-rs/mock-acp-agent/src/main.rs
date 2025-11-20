@@ -164,11 +164,24 @@ impl acp::Agent for MockAgent {
             }
         }
 
-        self.send_text_chunk(session_id.clone(), "Test message 1")
-            .await?;
+        // Support custom response text for TUI testing
+        if let Ok(response) = std::env::var("MOCK_AGENT_RESPONSE") {
+            self.send_text_chunk(session_id.clone(), &response).await?;
+        } else {
+            // Default behavior
+            self.send_text_chunk(session_id.clone(), "Test message 1")
+                .await?;
 
-        self.send_text_chunk(session_id.clone(), "Test message 2")
-            .await?;
+            self.send_text_chunk(session_id.clone(), "Test message 2")
+                .await?;
+        }
+
+        // Support configurable delay for simulating realistic streaming
+        if let Ok(delay_str) = std::env::var("MOCK_AGENT_DELAY_MS") {
+            if let Ok(delay) = delay_str.parse::<u64>() {
+                sleep(Duration::from_millis(delay)).await;
+            }
+        }
 
         if let Ok(file_path) = std::env::var("MOCK_AGENT_REQUEST_FILE") {
             eprintln!("Mock agent: requesting file read: {}", file_path);
