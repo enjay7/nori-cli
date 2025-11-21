@@ -1,34 +1,6 @@
 use insta::assert_snapshot;
 use std::time::{Duration, Instant};
-use tui_integration_tests::{SessionConfig, TuiSession};
-
-const TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Normalize dynamic content in screen output for snapshot testing
-fn normalize_for_snapshot(contents: String) -> String {
-    let mut normalized = contents;
-
-    // Replace /tmp/.tmpXXXXXX with placeholder
-    if let Some(start) = normalized.find("/tmp/.tmp") {
-        if let Some(end) = normalized[start..].find(char::is_whitespace) {
-            normalized.replace_range(start..start + end, "[TMP_DIR]");
-        }
-    }
-
-    // Replace dynamic prompt text on lines starting with ›
-    let lines: Vec<String> = normalized
-        .lines()
-        .map(|line| {
-            if line.trim_start().starts_with("›") && !line.contains("for shortcuts") {
-                "› [DEFAULT_PROMPT]".to_string()
-            } else {
-                line.to_string()
-            }
-        })
-        .collect();
-
-    lines.join("\n")
-}
+use tui_integration_tests::{normalize_for_snapshot, SessionConfig, TuiSession, TIMEOUT};
 
 #[test]
 fn test_startup_shows_welcome() {

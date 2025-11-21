@@ -1,0 +1,7 @@
+---
+source: tui-integration-tests/tests/input_handling.rs
+expression: normalize_for_snapshot(session.screen_contents())
+---
+› /model
+
+  /model  choose what model and reasoning effort to use

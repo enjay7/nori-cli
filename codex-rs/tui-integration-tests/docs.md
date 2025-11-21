@@ -30,6 +30,25 @@ The main API provides:
 - `wait_for(predicate, timeout)` - Poll screen until condition matches
 - `screen_contents()` - Get current terminal screen as string
 
+**Debugging Aids:**
+
+`TuiSession` implements `Drop` to print screen state when tests panic, making it easier to diagnose PTY timing issues:
+```rust
+impl Drop for TuiSession {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("\n=== TUI Screen State at Panic ===");
+            eprintln!("{}", self.screen_contents());
+            eprintln!("=================================\n");
+        }
+    }
+}
+```
+
+The crate exports helper functions for consistent test patterns:
+- `TIMEOUT: Duration` - Standard 5-second timeout constant for use across all tests
+- `normalize_for_snapshot(contents: String) -> String` - Normalizes dynamic content for snapshot testing (see below)
+
 **Automatic Test Isolation:**
 
 All tests run in isolated temporary directories created in `/tmp/`:
@@ -86,23 +105,35 @@ By default, all spawned sessions use `ApprovalPolicy::OnFailure` which:
 
 ### Things to Know
 
+**PTY Input Timing Pattern:**
+
+To avoid race conditions between sending input and the TUI processing it, tests add a 100ms delay after `send_str()` and `send_key()` operations when submitting prompts or navigating UI:
+
+```rust
+session.send_str("testing!!!").unwrap();
+std::thread::sleep(Duration::from_millis(100));
+session.send_key(Key::Enter).unwrap();
+std::thread::sleep(Duration::from_millis(100));
+```
+
+This delay allows the PTY subprocess time to process input and update the display before assertions check for results. The delay is added in test code (not in `TuiSession` methods) for flexibility—not all operations need delays.
+
 **Test Files Structure:**
 
 | File | Coverage |
 |------|----------|
-| `@/codex-rs/tui-integration-tests/tests/startup.rs` | TUI initialization, prompt display, trust screen skipping, snapshot testing for 4 startup scenarios |
+| `@/codex-rs/tui-integration-tests/tests/startup.rs` | TUI initialization, prompt display, trust screen skipping, snapshot testing for 4 startup scenarios, non-blocking PTY verification |
 | `@/codex-rs/tui-integration-tests/tests/prompt_flow.rs` | Prompt submission and agent responses |
-| `@/codex-rs/tui-integration-tests/tests/input_handling.rs` | Text editing, backspace, Ctrl-C clearing |
-| `@/codex-rs/tui-integration-tests/tests/cancellation.rs` | Stream cancellation with Escape key |
+| `@/codex-rs/tui-integration-tests/tests/input_handling.rs` | Text editing, backspace, Ctrl-C clearing, arrow key navigation with snapshot testing |
+| `@/codex-rs/tui-integration-tests/tests/streaming.rs` | Prompt submission with timing delays, agent response streaming |
 
 **Snapshot Files:**
 
 | File | Test Coverage |
 |------|---------------|
-| `@/codex-rs/tui-integration-tests/tests/snapshots/startup__startup_shows_welcome.snap` | Welcome screen display in 24x80 terminal |
-| `@/codex-rs/tui-integration-tests/tests/snapshots/startup__startup_welcome_dimensions_40x120.snap` | Welcome screen display respecting 40x120 terminal dimensions |
-| `@/codex-rs/tui-integration-tests/tests/snapshots/startup__runs_in_temp_directory.snap` | Temp directory path shown in welcome screen |
-| `@/codex-rs/tui-integration-tests/tests/snapshots/startup__trust_screen_skipped.snap` | Main prompt when trust screen is skipped with default config |
+| `@/codex-rs/tui-integration-tests/tests/snapshots/startup__*.snap` | Various startup screen scenarios (welcome, dimensions, temp directory, trust screen) |
+| `@/codex-rs/tui-integration-tests/tests/snapshots/input_handling__*.snap` | Input handling scenarios (ctrl-c clear, typing/backspace, model changed) |
+| `@/codex-rs/tui-integration-tests/tests/snapshots/streaming__submit_input.snap` | Prompt submission and streaming response |
 
 **Snapshot Testing with Insta:**
 
@@ -115,12 +146,24 @@ Snapshots stored in `@/codex-rs/tui-integration-tests/tests/snapshots/*.snap` fo
 
 **Snapshot Normalization:**
 
-The `normalize_for_snapshot()` helper function in `@/codex-rs/tui-integration-tests/tests/startup.rs` ensures stable snapshots across test runs by replacing dynamic content:
-- Temp directory paths (`/tmp/.tmpXXXXXX`) → `[TMP_DIR]` placeholder
-- Random default prompts on lines starting with `›` → `[DEFAULT_PROMPT]` placeholder
-- Lines containing "for shortcuts" are preserved as-is (e.g., "? for shortcuts")
+The `normalize_for_snapshot()` helper function exported from `@/codex-rs/tui-integration-tests/src/lib.rs` ensures stable snapshots across test runs by replacing dynamic content:
 
-This normalization pattern allows snapshot assertions to focus on UI structure and content rather than ephemeral runtime values.
+Normalization rules:
+1. Temp directory paths (`/tmp/.tmpXXXXXX`) → `[TMP_DIR]` placeholder
+2. Random default prompts on lines starting with `› ` → `[DEFAULT_PROMPT]` placeholder
+   - Detects specific default prompt patterns: "Find and fix a bug", "Explain this codebase", "Write tests for", etc.
+   - Preserves user-entered prompts and UI text like "? for shortcuts"
+
+Implementation in `@/codex-rs/tui-integration-tests/src/lib.rs:456-488`:
+```rust
+pub fn normalize_for_snapshot(contents: String) -> String {
+    // Replace /tmp/.tmpXXXXXX with [TMP_DIR]
+    // Replace known default prompts with [DEFAULT_PROMPT]
+    // Preserves UI structure and user input
+}
+```
+
+This normalization allows snapshot assertions to focus on UI structure and static content rather than ephemeral runtime values. All tests import and use this function consistently: `use tui_integration_tests::{normalize_for_snapshot, ...};`
 
 **PTY Implementation Details:**
 

@@ -31,6 +31,16 @@ pub struct TuiSession {
     _temp_dir: Option<tempfile::TempDir>,
 }
 
+impl Drop for TuiSession {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("\n=== TUI Screen State at Panic ===");
+            eprintln!("{}", self.screen_contents());
+            eprintln!("=================================\n");
+        }
+    }
+}
+
 impl TuiSession {
     /// Spawn codex with mock-acp-agent in a temporary directory
     pub fn spawn(rows: u16, cols: u16) -> Result<Self> {
@@ -439,4 +449,40 @@ fn codex_binary_path() -> String {
         .join("codex")
         .to_string_lossy()
         .into_owned()
+}
+
+pub const TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Normalize dynamic content in screen output for snapshot testing
+pub fn normalize_for_snapshot(contents: String) -> String {
+    let mut normalized = contents;
+
+    // Replace /tmp/.tmpXXXXXX with placeholder
+    if let Some(start) = normalized.find("/tmp/.tmp") {
+        if let Some(end) = normalized[start..].find(char::is_whitespace) {
+            normalized.replace_range(start..start + end, "[TMP_DIR]");
+        }
+    }
+
+    // Replace dynamic prompt text on lines starting with ›
+    let lines: Vec<String> = normalized
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("› ")
+                && (line.trim_start().starts_with("› Find and fix a bug")
+                    || line.trim_start().starts_with("› Explain this codebase")
+                    || line.trim_start().starts_with("› Write tests for")
+                    || line.trim_start().starts_with("› Improve documentation")
+                    || line.trim_start().starts_with("› Summarize recent commits")
+                    || line.trim_start().starts_with("› Implement {feature}")
+                    || line.contains("@filename"))
+            {
+                "› [DEFAULT_PROMPT]".to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+
+    lines.join("\n")
 }

@@ -12,10 +12,12 @@ fn test_submit_prompt_default_response() {
 
     // Type prompt
     session.send_str("Hello").unwrap();
+    std::thread::sleep(Duration::from_millis(100));
     session.wait_for_text("Hello", TIMEOUT).unwrap();
 
     // Submit
     session.send_key(Key::Enter).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
 
     // Wait for default mock responses
     session
@@ -38,7 +40,9 @@ fn test_submit_prompt_custom_response() {
     session.wait_for_text("To get started", TIMEOUT).unwrap();
 
     session.send_str("test prompt").unwrap();
+    std::thread::sleep(Duration::from_millis(100));
     session.send_key(Key::Enter).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
 
     session
         .wait_for_text("This is a custom test response", TIMEOUT)
