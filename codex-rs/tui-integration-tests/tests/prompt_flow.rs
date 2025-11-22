@@ -1,0 +1,70 @@
+use insta::assert_snapshot;
+use std::time::Duration;
+use tui_integration_tests::{Key, SessionConfig, TuiSession};
+
+const TIMEOUT: Duration = Duration::from_secs(10);
+
+#[test]
+fn test_submit_prompt_default_response() {
+    let mut session = TuiSession::spawn(24, 80).expect("Failed to spawn codex");
+
+    session.wait_for_text("To get started", TIMEOUT).unwrap();
+
+    // Type prompt
+    session.send_str("Hello").unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    session.wait_for_text("Hello", TIMEOUT).unwrap();
+
+    // Submit
+    session.send_key(Key::Enter).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Wait for default mock responses
+    session
+        .wait_for_text("Test message 1", TIMEOUT)
+        .expect("Did not receive mock response");
+    session
+        .wait_for_text("Test message 2", TIMEOUT)
+        .expect("Did not receive second mock response");
+
+    assert_snapshot!("prompt_submitted", session.screen_contents());
+}
+
+#[test]
+fn test_submit_prompt_custom_response() {
+    let config = SessionConfig::new()
+        .with_mock_response("This is a custom test response from the mock agent.");
+
+    let mut session = TuiSession::spawn_with_config(24, 80, config).expect("Failed to spawn codex");
+
+    session.wait_for_text("To get started", TIMEOUT).unwrap();
+
+    session.send_str("test prompt").unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    session.send_key(Key::Enter).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+
+    session
+        .wait_for_text("This is a custom test response", TIMEOUT)
+        .expect("Did not receive custom response");
+
+    assert_snapshot!("custom_response", session.screen_contents());
+}
+
+#[test]
+fn test_multiline_input() {
+    let mut session = TuiSession::spawn(24, 80).unwrap();
+    session.wait_for_text("To get started", TIMEOUT).unwrap();
+
+    // Type multiline prompt
+    session.send_str("Line 1").unwrap();
+    session.send_key(Key::Enter).unwrap();
+    session.send_str("Line 2").unwrap();
+    session.send_key(Key::Enter).unwrap();
+    session.send_str("Line 3").unwrap();
+
+    // Verify all lines visible
+    session.wait_for_text("Line 1", TIMEOUT).unwrap();
+    session.wait_for_text("Line 2", TIMEOUT).unwrap();
+    session.wait_for_text("Line 3", TIMEOUT).unwrap();
+}
