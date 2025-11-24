@@ -54,8 +54,19 @@ The crate exports helper functions for consistent test patterns:
 All tests run in isolated temporary directories created in `/tmp/`:
 - Each `spawn()` or `spawn_with_config()` call creates a new temp directory
 - Directory contains a `hello.py` file with `print('Hello, World!')`
+- A `config.toml` is automatically generated in the temp directory (used as CODEX_HOME)
 - Temp directory is automatically cleaned up when `TuiSession` is dropped
 - Tests no longer run in user's home directory for better isolation
+
+**Generated config.toml:**
+
+By default, each session creates a `config.toml` in the temp directory with:
+- `model` - Set to the configured model (defaults to `"mock-model"`)
+- `model_provider = "mock_provider"` - Uses a custom provider that doesn't require OpenAI auth
+- `trust_level = "trusted"` for the working directory - Skips trust approval screen
+- `wire_api = "acp"` - Routes through ACP registry for model resolution
+
+Custom config.toml content can be provided via `SessionConfig::with_config_toml(content)`
 
 **Architecture:**
 
@@ -93,7 +104,9 @@ Builder pattern for test environment setup:
 - `with_agent_env(key, value)` - Pass custom env vars to mock agent
 - `with_approval_policy(policy)` - Set approval policy (defaults to `OnFailure`)
 - `without_approval_policy()` - Remove approval policy to test trust screen
+- `with_config_toml(content)` - Provide custom config.toml content (overrides default generation)
 - `cwd` field - Optional working directory (auto-created temp directory if None)
+- `config_toml` field - Optional custom config.toml content (None generates default)
 
 **Approval Policy:** `ApprovalPolicy` enum controls when codex asks for command approval:
 - `Untrusted` - Only run trusted commands without approval

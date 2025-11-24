@@ -31,6 +31,7 @@ result
 CLAUDE.md
 # .claude/
 .claude/settings.local.json
+settings.local.json
 .claude/agents/
 .claude/commands/
 AGENTS.override.md

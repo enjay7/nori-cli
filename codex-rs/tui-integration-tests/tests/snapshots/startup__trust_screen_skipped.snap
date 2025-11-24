@@ -1,6 +1,5 @@
 ---
 source: tui-integration-tests/tests/startup.rs
-assertion_line: 135
 expression: normalize_for_snapshot(session.screen_contents())
 ---
 › [DEFAULT_PROMPT]

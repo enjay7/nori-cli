@@ -1,0 +1,28 @@
+---
+source: tui-integration-tests/tests/prompt_flow.rs
+expression: normalize_for_snapshot(session.screen_contents())
+---
+╭───────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.0.0)                  │
+│                                           │
+│ model:     nonexistent   /model to change │
+│ directory: [TMP_DIR]                │
+╰───────────────────────────────────────────╯
+
+  To get started, describe a task or try one of these commands:
+
+  /init - create an AGENTS.md file with instructions for Codex
+  /status - show current session configuration
+  /approvals - choose what Codex can do without approval
+  /model - choose what model and reasoning effort to use
+  /review - review any changes and find issues
+
+■ Fatal error: Model 'nonexistent' has wire_api=acp but is not registered in the
+ACP registry
+
+• Snapshots disabled: current directory is not a Git repository. (0s • esc to in
+
+
+› [DEFAULT_PROMPT]
+
+  100% context left · ? for shortcuts

@@ -1,5 +1,6 @@
 use insta::assert_snapshot;
 use std::time::Duration;
+use tui_integration_tests::normalize_for_snapshot;
 use tui_integration_tests::Key;
 use tui_integration_tests::SessionConfig;
 use tui_integration_tests::TuiSession;
@@ -11,15 +12,6 @@ fn test_submit_prompt_default_response() {
     let mut session = TuiSession::spawn(24, 80).expect("Failed to spawn codex");
 
     session.wait_for_text("? for shortcuts", TIMEOUT).unwrap();
-
-    // session.send_str("/model").unwrap();
-    // std::thread::sleep(Duration::from_millis(200));
-    // session.wait_for_text("/model", TIMEOUT).unwrap();
-    // session.send_key(Key::Enter).unwrap();
-    // std::thread::sleep(Duration::from_millis(100));
-    // assert_snapshot!("list_models", session.screen_contents());
-    // session.send_key(Key::Escape).unwrap();
-    // std::thread::sleep(Duration::from_millis(100));
 
     // Type prompt
     session.send_str("Hello").unwrap();
@@ -42,7 +34,10 @@ fn test_submit_prompt_default_response() {
         .wait_for_text("Test message", Duration::from_secs(15))
         .unwrap();
 
-    assert_snapshot!("prompt_submitted", session.screen_contents());
+    assert_snapshot!(
+        "prompt_submitted",
+        normalize_for_snapshot(session.screen_contents())
+    );
 }
 
 #[test]
@@ -67,12 +62,15 @@ fn test_submit_prompt_missing_model() {
 
     session
         .wait_for_text(
-            "ACP agent config error: Unknown ACP model: nonexistent-acp",
+            "Model 'nonexistent' has wire_api=acp but is not registered",
             Duration::from_secs(10),
         )
         .unwrap();
 
-    assert_snapshot!("missing_model", session.screen_contents());
+    assert_snapshot!(
+        "missing_model",
+        normalize_for_snapshot(session.screen_contents())
+    );
 }
 
 // #[test]

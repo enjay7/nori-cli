@@ -131,7 +131,35 @@ impl TuiSession {
         // Set CODEX_HOME to temp directory if we have one, so logs and config
         // go to the temp directory instead of trying to write to ~/.codex
         if let Some(temp) = &temp_dir {
-            cmd.env("CODEX_HOME", temp.path().to_str().unwrap());
+            let codex_home = temp.path();
+            cmd.env("CODEX_HOME", codex_home.to_str().unwrap());
+
+            // Write config.toml to CODEX_HOME
+            let config_path = codex_home.join("config.toml");
+            let config_content = config.config_toml.unwrap_or_else(|| {
+                // Generate default config with model, trusted project path,
+                // and mock_provider that doesn't require OpenAI auth
+                let cwd_path = config
+                    .cwd
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| codex_home.to_string_lossy().into_owned());
+                format!(
+                    r#"model = "{model}"
+model_provider = "mock_provider"
+
+[projects."{cwd}"]
+trust_level = "trusted"
+
+[model_providers.mock_provider]
+name = "Mock ACP provider for tests"
+wire_api = "acp"
+"#,
+                    model = config.model,
+                    cwd = cwd_path
+                )
+            });
+            std::fs::write(&config_path, config_content)?;
         }
 
         // Pass through mock agent env vars
@@ -402,6 +430,9 @@ pub struct SessionConfig {
     pub approval_policy: Option<ApprovalPolicy>,
     pub sandbox: Option<Sandbox>,
     pub cwd: Option<std::path::PathBuf>,
+    /// Custom config.toml content. If None, a default config will be generated.
+    /// Set to Some("") to write an empty config file.
+    pub config_toml: Option<String>,
 }
 
 impl Default for SessionConfig {
@@ -420,6 +451,7 @@ impl SessionConfig {
             // [possible values: read-only, workspace-write, danger-full-access]
             sandbox: Some(Sandbox::WorkspaceWrite),
             cwd: None,
+            config_toml: None,
         }
     }
 
@@ -466,6 +498,11 @@ impl SessionConfig {
         self.sandbox = None;
         self
     }
+
+    pub fn with_config_toml(mut self, content: impl Into<String>) -> Self {
+        self.config_toml = Some(content.into());
+        self
+    }
 }
 
 /// Get path to codex binary
@@ -486,10 +523,16 @@ pub const TIMEOUT: Duration = Duration::from_secs(5);
 pub fn normalize_for_snapshot(contents: String) -> String {
     let mut normalized = contents;
 
-    // Replace /tmp/.tmpXXXXXX with placeholder
-    if let Some(start) = normalized.find("/tmp/.tmp") {
-        if let Some(end) = normalized[start..].find(char::is_whitespace) {
-            normalized.replace_range(start..start + end, "[TMP_DIR]");
+    // Replace /tmp/.tmpXXXXXX or /tmp/claude/.tmpXXXXXX with placeholder
+    for pattern in &["/tmp/claude/.tmp", "/tmp/.tmp"] {
+        while let Some(start) = normalized.find(pattern) {
+            if let Some(end) = normalized[start..].find(char::is_whitespace) {
+                normalized.replace_range(start..start + end, "[TMP_DIR]");
+            } else {
+                // Handle case where path is at end of string
+                normalized.replace_range(start.., "[TMP_DIR]");
+                break;
+            }
         }
     }
 
