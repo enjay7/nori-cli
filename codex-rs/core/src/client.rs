@@ -154,9 +154,22 @@ impl ModelClient {
     }
 
     pub async fn stream(&self, prompt: &Prompt) -> Result<ResponseStream> {
-        // TODO! provider doesn't change until restart, so need to fix that
-        // if we want to support both ACP and API longer term
-        match self.provider.wire_api {
+        // First try loading the model fom the ACP registry, ignoring the provider
+        // TODO: registry needs to also resolve the model provider
+        // possible wrapping the ACP config
+        // let providers = self.config().model_providers;
+        let provider_config =
+            if let Ok(acp) = codex_acp::registry::get_agent_config(&self.get_model()) {
+                tracing::debug!(
+                    "Agent: {}, Provider: {}",
+                    &self.get_model(),
+                    acp.provider_slug
+                );
+                todo!();
+            } else {
+                &self.provider
+            };
+        match provider_config.wire_api {
             WireApi::Responses => self.stream_responses(prompt).await,
             WireApi::Chat => {
                 // Create the raw streaming connection first.
@@ -199,15 +212,17 @@ impl ModelClient {
                 // Get ACP agent configuration from registry using model name
                 debug!("Looking up ACP agent for model: {}", &self.config.model);
                 let agent_config = codex_acp::get_agent_config(&self.config.model)
+                    // TODO unify this retreival with the above
+                    // (put the agent config in the ACP variant?)
                     .map_err(|e| CodexErr::Fatal(format!("ACP agent config error: {e}")))?;
                 debug!(
                     "Resolved ACP provider: {}, command: {}",
-                    agent_config.provider, agent_config.command
+                    provider_config.name, agent_config.command
                 );
 
-                // Create ACP model client
+                // Create ACP client
                 todo!();
-                // Then bridge from ACP event stream back to ResponseStream
+                // Then use or create a session to deliver a ResponseStream
             }
         }
     }

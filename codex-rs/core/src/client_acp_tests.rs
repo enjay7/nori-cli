@@ -63,7 +63,7 @@ mod tests {
         );
 
         let config = mock_config.unwrap();
-        assert_eq!(config.provider, "mock-acp");
+        assert_eq!(config.provider_slug, "mock-acp");
         assert!(
             config.command.contains("mock_acp_agent"),
             "Command should contain 'mock_acp_agent'"

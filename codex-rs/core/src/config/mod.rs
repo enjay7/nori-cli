@@ -1332,17 +1332,23 @@ fn default_review_model() -> String {
 /// This allows users to specify just `--model mock-acp` without needing to also
 /// specify `--model-provider mock-acp`.
 fn infer_provider_from_model(model: &str) -> Option<String> {
+    use crate::model_provider_info::CLAUDE_ACP_PROVIDER_ID;
     use crate::model_provider_info::GEMINI_ACP_PROVIDER_ID;
     use crate::model_provider_info::MOCK_ACP_PROVIDER_ID;
     tracing::debug!("Inferring provider! found model {model}");
 
     // Check for ACP-based models that have their own provider
-    if model.starts_with("mock-acp") {
+    if model.starts_with("mock") {
         tracing::debug!("Inferring provider! choosing `mock-acp`");
         return Some(MOCK_ACP_PROVIDER_ID.to_string());
     }
 
-    if model.starts_with("gemini") || model.contains("gemini") {
+    if model.starts_with("claude") {
+        tracing::debug!("Inferring provider! choosing `claude-acp`");
+        return Some(CLAUDE_ACP_PROVIDER_ID.to_string());
+    }
+
+    if model.starts_with("gemini") {
         tracing::debug!("Inferring provider! choosing `gemini-acp`");
         return Some(GEMINI_ACP_PROVIDER_ID.to_string());
     }

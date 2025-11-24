@@ -10,7 +10,7 @@ use anyhow::Result;
 pub struct AcpAgentConfig {
     /// Provider identifier (e.g., "mock-acp", "gemini-acp")
     /// Used to determine when subprocess can be reused vs needs replacement
-    pub provider: String,
+    pub provider_slug: String,
     /// Command to execute (binary path or command name)
     pub command: String,
     /// Arguments to pass to the command
@@ -24,7 +24,7 @@ pub struct AcpAgentConfig {
 ///   Names are normalized to lowercase for case-insensitive matching.
 ///
 /// # Returns
-/// Configuration with provider, command and args to spawn the agent subprocess
+/// Configuration with provider_slug, command and args to spawn the agent subprocess
 ///
 /// # Errors
 /// Returns error if model_name is not recognized
@@ -55,13 +55,13 @@ pub fn get_agent_config(model_name: &str) -> Result<AcpAgentConfig> {
             };
 
             Ok(AcpAgentConfig {
-                provider: "mock-acp".to_string(),
+                provider_slug: "mock-acp".to_string(),
                 command: exe_path.to_string_lossy().to_string(),
                 args: vec![],
             })
         }
         "gemini-2.5-flash" | "gemini-acp" => Ok(AcpAgentConfig {
-            provider: "gemini-acp".to_string(),
+            provider_slug: "gemini-acp".to_string(),
             command: "npx".to_string(),
             args: vec![
                 "@google/gemini-cli".to_string(),
@@ -69,7 +69,7 @@ pub fn get_agent_config(model_name: &str) -> Result<AcpAgentConfig> {
             ],
         }),
         "claude" | "claude-acp" => Ok(AcpAgentConfig {
-            provider: "claude-acp".to_string(),
+            provider_slug: "claude-acp".to_string(),
             command: "npx".to_string(),
             args: vec!["@zed-industries/claude-code-acp".to_string()],
         }),
@@ -85,7 +85,7 @@ mod tests {
     fn test_get_mock_model_config() {
         let config = get_agent_config("mock-model").expect("Should return config for mock-model");
 
-        assert_eq!(config.provider, "mock-acp");
+        assert_eq!(config.provider_slug, "mock-acp");
         assert!(
             config.command.contains("mock_acp_agent"),
             "Command should contain 'mock_acp_agent', got: {}",
@@ -99,7 +99,7 @@ mod tests {
         let config = get_agent_config("gemini-2.5-flash")
             .expect("Should return config for gemini-2.5-flash");
 
-        assert_eq!(config.provider, "gemini-acp");
+        assert_eq!(config.provider_slug, "gemini-acp");
         assert_eq!(config.command, "npx");
         assert_eq!(
             config.args,
@@ -135,7 +135,7 @@ mod tests {
             "Mixed case 'Gemini-2.5-Flash' should work"
         );
         assert_eq!(
-            gemini_result.unwrap().provider,
+            gemini_result.unwrap().provider_slug,
             "gemini-acp",
             "Should resolve to gemini-acp provider"
         );
@@ -143,7 +143,7 @@ mod tests {
         let mock_result = get_agent_config("Mock-Model");
         assert!(mock_result.is_ok(), "Mixed case 'Mock-Model' should work");
         assert_eq!(
-            mock_result.unwrap().provider,
+            mock_result.unwrap().provider_slug,
             "mock-acp",
             "Should resolve to mock-acp provider"
         );

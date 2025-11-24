@@ -1,7 +1,10 @@
 use codex_protocol::config_types::ReasoningEffort;
 use codex_protocol::config_types::Verbosity;
 
+use crate::GEMINI_ACP_PROVIDER_ID;
 use crate::config::types::ReasoningSummaryFormat;
+use crate::model_provider_info::CLAUDE_ACP_PROVIDER_ID;
+use crate::model_provider_info::MOCK_ACP_PROVIDER_ID;
 use crate::tools::handlers::apply_patch::ApplyPatchToolType;
 use crate::tools::spec::ConfigShellToolType;
 
@@ -121,18 +124,18 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
             needs_special_apply_patch_instructions: true,
             shell_type: ConfigShellToolType::Local,
         )
-    } else if slug.starts_with("gemini-acp") {
-        model_family!(
-            slug, "gemini-acp",
-            supports_parallel_tool_calls: true,
-        )
     } else if slug.starts_with("gemini") {
         model_family!(
-            slug, "gemini",
+            slug, GEMINI_ACP_PROVIDER_ID,
             supports_parallel_tool_calls: true,
         )
-    } else if slug.starts_with("mock-acp") {
-        model_family!(slug, "mock-acp",)
+    } else if slug.starts_with("claude") {
+        model_family!(
+            slug, CLAUDE_ACP_PROVIDER_ID,
+            supports_parallel_tool_calls: true,
+        )
+    } else if slug.starts_with("mock") {
+        model_family!(slug, MOCK_ACP_PROVIDER_ID)
     } else if slug.starts_with("gpt-4.1") {
         model_family!(
             slug, "gpt-4.1",
