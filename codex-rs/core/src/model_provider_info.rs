@@ -309,7 +309,6 @@ pub const DEFAULT_OLLAMA_PORT: u16 = 11434;
 
 pub const LMSTUDIO_OSS_PROVIDER_ID: &str = "lmstudio";
 pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
-pub const BUILT_IN_OSS_MODEL_PROVIDER_ID: &str = "oss";
 
 // ACP provider identifiers (used for model inference, not in built_in_model_providers)
 // Actual ACP provider configuration is embedded in AcpAgentConfig from codex_acp::registry

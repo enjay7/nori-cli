@@ -1,10 +1,10 @@
 use codex_protocol::config_types::ReasoningEffort;
 use codex_protocol::config_types::Verbosity;
 
+use crate::CLAUDE_ACP_PROVIDER_ID;
 use crate::GEMINI_ACP_PROVIDER_ID;
+use crate::MOCK_ACP_PROVIDER_ID;
 use crate::config::types::ReasoningSummaryFormat;
-use crate::model_provider_info::CLAUDE_ACP_PROVIDER_ID;
-use crate::model_provider_info::MOCK_ACP_PROVIDER_ID;
 use crate::tools::handlers::apply_patch::ApplyPatchToolType;
 use crate::tools::spec::ConfigShellToolType;
 

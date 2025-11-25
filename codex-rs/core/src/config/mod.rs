@@ -1061,17 +1061,10 @@ impl Config {
             model_providers.entry(key).or_insert(provider);
         }
 
-        // Determine model early so we can infer provider if needed
-        let model = model
-            .or(config_profile.model.clone())
-            .or(cfg.model.clone())
-            .unwrap_or_else(default_model);
-
         let model_provider_id = model_provider
             .or(config_profile.model_provider)
             .or(cfg.model_provider)
             .unwrap_or_else(|| "openai".to_string());
-
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {
@@ -1105,7 +1098,11 @@ impl Config {
 
         let forced_login_method = cfg.forced_login_method;
 
-        // Model was already determined above for provider inference
+        let model = model
+            .or(config_profile.model)
+            .or(cfg.model)
+            .unwrap_or_else(default_model);
+
         let mut model_family =
             find_family_for_model(&model).unwrap_or_else(|| derive_default_model_family(&model));
 
