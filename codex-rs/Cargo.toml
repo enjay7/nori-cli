@@ -43,7 +43,7 @@ members = [
     "utils/tokenizer",
     "acp",
     "mock-acp-agent",
-    "tui-integration-tests",
+    "tui-pty-e2e",
 ]
 resolver = "2"
 

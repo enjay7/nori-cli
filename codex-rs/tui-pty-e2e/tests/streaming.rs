@@ -1,10 +1,10 @@
 use insta::assert_snapshot;
 use std::time::Duration;
-use tui_integration_tests::normalize_for_snapshot;
-use tui_integration_tests::Key;
-use tui_integration_tests::SessionConfig;
-use tui_integration_tests::TuiSession;
-use tui_integration_tests::TIMEOUT;
+use tui_pty_e2e::Key;
+use tui_pty_e2e::SessionConfig;
+use tui_pty_e2e::TIMEOUT;
+use tui_pty_e2e::TuiSession;
+use tui_pty_e2e::normalize_for_snapshot;
 
 #[test]
 fn test_submit_text() {

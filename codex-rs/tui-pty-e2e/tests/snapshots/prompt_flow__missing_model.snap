@@ -1,11 +1,7 @@
 ---
-source: tui-integration-tests/tests/prompt_flow.rs
+source: tui-pty-e2e/tests/prompt_flow.rs
 expression: normalize_for_snapshot(session.screen_contents())
 ---
-╭───────────────────────────────────────────╮
-│ >_ OpenAI Codex (v0.0.0)                  │
-│                                           │
-│ model:     nonexistent   /model to change │
 │ directory: [TMP_DIR]                │
 ╰───────────────────────────────────────────╯
 
@@ -16,6 +12,10 @@ expression: normalize_for_snapshot(session.screen_contents())
   /approvals - choose what Codex can do without approval
   /model - choose what model and reasoning effort to use
   /review - review any changes and find issues
+
+
+› Hello
+
 
 ■ Fatal error: Model 'nonexistent' has wire_api=acp but is not registered in the
 ACP registry

@@ -1,6 +1,6 @@
 # Noridoc: TUI Integration Tests
 
-Path: @/codex-rs/tui-integration-tests
+Path: @/codex-rs/tui-pty-e2e
 
 ### Overview
 
@@ -19,7 +19,7 @@ Path: @/codex-rs/tui-integration-tests
 
 ### Core Implementation
 
-**Test Harness:** `TuiSession` in `@/codex-rs/tui-integration-tests/src/lib.rs`
+**Test Harness:** `TuiSession` in `@/codex-rs/tui-pty-e2e/src/lib.rs`
 
 The main API provides:
 - `spawn(rows, cols)` - Launch codex binary with mock-acp-agent in PTY with automatic temp directory
@@ -86,7 +86,7 @@ Screen State   ACP registry lookup → mock-acp provider
             mock_acp_agent (env var configured)
 ```
 
-**Key Input Handling:** `Key` enum in `@/codex-rs/tui-integration-tests/src/keys.rs`
+**Key Input Handling:** `Key` enum in `@/codex-rs/tui-pty-e2e/src/keys.rs`
 
 Converts high-level key events to ANSI escape sequences:
 - `Key::Enter` → `\r`
@@ -95,7 +95,7 @@ Converts high-level key events to ANSI escape sequences:
 - `Key::Backspace` → `\x7f`
 - `Key::Ctrl('c')` → Control character encoding
 
-**Session Configuration:** `SessionConfig` in `@/codex-rs/tui-integration-tests/src/lib.rs`
+**Session Configuration:** `SessionConfig` in `@/codex-rs/tui-pty-e2e/src/lib.rs`
 
 Builder pattern for test environment setup:
 - `model` field - Model name to use (defaults to `"mock-model"` which resolves to mock-acp-agent via ACP registry)
@@ -138,18 +138,18 @@ This delay allows the PTY subprocess time to process input and update the displa
 
 | File | Coverage |
 |------|----------|
-| `@/codex-rs/tui-integration-tests/tests/startup.rs` | TUI initialization, prompt display, trust screen skipping, snapshot testing for 4 startup scenarios, non-blocking PTY verification |
-| `@/codex-rs/tui-integration-tests/tests/prompt_flow.rs` | Prompt submission and agent responses |
-| `@/codex-rs/tui-integration-tests/tests/input_handling.rs` | Text editing, backspace, Ctrl-C clearing, arrow key navigation with snapshot testing |
-| `@/codex-rs/tui-integration-tests/tests/streaming.rs` | Prompt submission with timing delays, agent response streaming |
+| `@/codex-rs/tui-pty-e2e/tests/startup.rs` | TUI initialization, prompt display, trust screen skipping, snapshot testing for 4 startup scenarios, non-blocking PTY verification |
+| `@/codex-rs/tui-pty-e2e/tests/prompt_flow.rs` | Prompt submission and agent responses |
+| `@/codex-rs/tui-pty-e2e/tests/input_handling.rs` | Text editing, backspace, Ctrl-C clearing, arrow key navigation with snapshot testing |
+| `@/codex-rs/tui-pty-e2e/tests/streaming.rs` | Prompt submission with timing delays, agent response streaming |
 
 **Snapshot Files:**
 
 | File | Test Coverage |
 |------|---------------|
-| `@/codex-rs/tui-integration-tests/tests/snapshots/startup__*.snap` | Various startup screen scenarios (welcome, dimensions, temp directory, trust screen) |
-| `@/codex-rs/tui-integration-tests/tests/snapshots/input_handling__*.snap` | Input handling scenarios (ctrl-c clear, typing/backspace, model changed) |
-| `@/codex-rs/tui-integration-tests/tests/snapshots/streaming__submit_input.snap` | Prompt submission and streaming response |
+| `@/codex-rs/tui-pty-e2e/tests/snapshots/startup__*.snap` | Various startup screen scenarios (welcome, dimensions, temp directory, trust screen) |
+| `@/codex-rs/tui-pty-e2e/tests/snapshots/input_handling__*.snap` | Input handling scenarios (ctrl-c clear, typing/backspace, model changed) |
+| `@/codex-rs/tui-pty-e2e/tests/snapshots/streaming__submit_input.snap` | Prompt submission and streaming response |
 
 **Snapshot Testing with Insta:**
 
@@ -158,11 +158,11 @@ Tests use `insta::assert_snapshot!()` to capture terminal output for visual regr
 assert_snapshot!("startup_screen", normalize_for_snapshot(session.screen_contents()));
 ```
 
-Snapshots stored in `@/codex-rs/tui-integration-tests/tests/snapshots/*.snap` for regression detection. Each snapshot captures the exact terminal output state at a specific test point.
+Snapshots stored in `@/codex-rs/tui-pty-e2e/tests/snapshots/*.snap` for regression detection. Each snapshot captures the exact terminal output state at a specific test point.
 
 **Snapshot Normalization:**
 
-The `normalize_for_snapshot()` helper function exported from `@/codex-rs/tui-integration-tests/src/lib.rs` ensures stable snapshots across test runs by replacing dynamic content:
+The `normalize_for_snapshot()` helper function exported from `@/codex-rs/tui-pty-e2e/src/lib.rs` ensures stable snapshots across test runs by replacing dynamic content:
 
 Normalization rules:
 1. Temp directory paths (`/tmp/.tmpXXXXXX`) → `[TMP_DIR]` placeholder
@@ -170,7 +170,7 @@ Normalization rules:
    - Detects specific default prompt patterns: "Find and fix a bug", "Explain this codebase", "Write tests for", etc.
    - Preserves user-entered prompts and UI text like "? for shortcuts"
 
-Implementation in `@/codex-rs/tui-integration-tests/src/lib.rs:456-488`:
+Implementation in `@/codex-rs/tui-pty-e2e/src/lib.rs:456-488`:
 ```rust
 pub fn normalize_for_snapshot(contents: String) -> String {
     // Replace /tmp/.tmpXXXXXX with [TMP_DIR]
@@ -179,7 +179,7 @@ pub fn normalize_for_snapshot(contents: String) -> String {
 }
 ```
 
-This normalization allows snapshot assertions to focus on UI structure and static content rather than ephemeral runtime values. All tests import and use this function consistently: `use tui_integration_tests::{normalize_for_snapshot, ...};`
+This normalization allows snapshot assertions to focus on UI structure and static content rather than ephemeral runtime values. All tests import and use this function consistently: `use tui_pty_e2e::{normalize_for_snapshot, ...};`
 
 **PTY Implementation Details:**
 

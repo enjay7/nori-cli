@@ -1,5 +1,5 @@
 ---
-source: tui-integration-tests/tests/startup.rs
+source: tui-pty-e2e/tests/startup.rs
 expression: normalize_for_snapshot(session.screen_contents())
 ---
 › [DEFAULT_PROMPT]

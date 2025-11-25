@@ -7013,7 +7013,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tui-integration-tests"
+name = "tui-pty-e2e"
 version = "0.1.0"
 dependencies = [
  "anyhow",

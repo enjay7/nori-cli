@@ -1,5 +1,5 @@
 ---
-source: tui-integration-tests/tests/input_handling.rs
+source: tui-pty-e2e/tests/input_handling.rs
 expression: normalize_for_snapshot(session.screen_contents())
 ---
 › /model

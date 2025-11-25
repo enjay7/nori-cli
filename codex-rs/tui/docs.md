@@ -99,7 +99,7 @@ The `color.rs` and `terminal_palette.rs` modules handle terminal color detection
 - `test_backend.rs`: Test terminal backend for snapshot testing
 - Uses `insta` for snapshot tests of rendered output
 - `AGENTS.md` documents testing conventions
-- Black-box integration tests in `@/codex-rs/tui-integration-tests` test full TUI via PTY
+- Black-box integration tests in `@/codex-rs/tui-pty-e2e` test full TUI via PTY
 - Integration tests spawn real `codex` binary with `mock-acp-agent` backend
 
 **Configuration Flow:**

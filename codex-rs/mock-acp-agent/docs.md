@@ -11,7 +11,7 @@ Path: @/codex-rs/mock-acp-agent
 ### How it fits into the larger codebase
 
 - Used by integration tests in `@/codex-rs/acp/tests/integration.rs` to test ACP protocol flow
-- Used by TUI black-box tests in `@/codex-rs/tui-integration-tests` as the `--model mock-acp-agent` backend
+- Used by TUI black-box tests in `@/codex-rs/tui-pty-e2e` as the `--model mock-acp-agent` backend
 - Enables end-to-end testing of `AgentProcess` without requiring real AI providers
 - Produces diagnostic stderr output that tests use to verify stderr capture functionality
 - Not shipped in production; exists solely for development and CI testing
