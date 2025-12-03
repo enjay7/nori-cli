@@ -1,327 +1,440 @@
-# ACP Client Implementation Plan
+# ACP Integration Implementation Plan: Parallel acp-core
 
-## Overview
+**Goal:** Integrate ACP (Agent Client Protocol) agents into the Codex TUI as an
+alternative backend to HTTP-based LLM providers, with zero changes to codex-core.
 
-This plan describes the implementation of an ACP (Agent Client Protocol) client in the `codex-acp` crate. The client will enable the CLI/TUI to communicate with ACP-compliant agents via JSON-RPC over stdio.
+**Summary:** The Agent Client Protocol (ACP) is a JSON-RPC 2.0 protocol for
+communicating with AI agent subprocesses over stdin/stdout. Instead of Codex
+making HTTP calls to LLM APIs (OpenAI, Anthropic, etc.), ACP spawns a local
+agent subprocess that handles its own HTTP communication, tool execution, and
+conversation history. The `codex_acp` crate acts as the Codex client to these
+agents, translating between ACP's event model and Codex's protocol types. This
+"Parallel acp-core" approach keeps the ACP integration completely separate from
+codex-core, enabling trivial upstream merges while retaining approval bridging
+functionality.
 
-## Design Decisions
+**Constraints:**
+- **Zero changes to codex-core** - All ACP logic lives in `acp/` crate to avoid upstream merge conflicts
+- **Minimal TUI changes** - Only `tui/src/chatwidget/agent.rs` is modified; all other TUI files remain unchanged
+- **Agent owns execution** - Tools, sandboxing, and command execution are delegated to the agent subprocess
+- **Agent owns history** - Conversation history is managed by the agent; no local persistence in Codex
+- **No LLM HTTP calls** - The `ModelClient`, `ToolRouter`, `ToolOrchestrator`, and `ContextManager` are bypassed entirely
+- **Separate registries** - ACP agents use `acp/src/registry.rs`, HTTP providers use `core/src/model_provider_info.rs`
 
-Based on scoping discussions, the following decisions have been made:
+**Architecture:**
+- `codex_acp` crate - Subprocess management, JSON-RPC I/O, type translation, backend adapter
+- `acp/src/backend.rs` - Backend adapter that mimics `CodexConversation` interface for TUI compatibility
+- `agent-client-protocol` library - External crate providing ACP types and traits
+- `codex_protocol` crate - Shared event types used by both HTTP and ACP flows
+- Dedicated worker thread - ACP uses `LocalBoxFuture` (!Send), requiring a single-threaded runtime
 
-1. **Connection lifecycle**: Spawn a fresh subprocess per session (simpler implementation)
-2. **Permission handling**: Bridge ACP permissions to existing codex approval system (consistent UX)
-3. **Tool output**: Pass through to TUI for rendering (avoid duplicating TUI logic)
-4. **Scope**: Core features (Phases 1-3) plus cancellation support (Phase 6)
+---
 
-## Architecture
+## Testing Plan
 
-### Current State
+### Integration Tests
 
-The `codex-acp` crate currently has:
-- `registry.rs`: Agent configuration registry (`AcpAgentConfig`, `AcpAgentRegistry`)
-- `lib.rs`: Re-exports registry and provides `get_agent_config()` helper
+1. **ACP Connection Lifecycle Test** (`acp/src/connection.rs`)
+   - Spawn mock agent, verify capabilities returned
+   - Create session, verify session ID returned
+   - Send prompt, verify SessionUpdates received
+   - Cancel session, verify cancellation succeeds
 
-The integration point is in `codex-core/src/client.rs:173` which has:
+2. **Approval Bridging Test** (`acp/src/translator.rs`)
+   - Translate ACP `RequestPermissionRequest` → Codex `ExecApprovalRequestEvent`
+   - Translate Codex `ReviewDecision::Approved` → ACP `RequestPermissionOutcome::Selected` with "allow" option
+   - Translate Codex `ReviewDecision::Denied` → ACP `RequestPermissionOutcome::Selected` with "reject" option
+
+3. **Event Translation Test** (`acp/src/translator.rs`)
+   - Translate `AgentMessageChunk` → `codex_protocol::Event` with `AgentMessageDelta`
+   - Translate `AgentThoughtChunk` → `codex_protocol::Event` with `AgentReasoningDelta`
+   - Verify `ToolCall`, `ToolCallUpdate`, `Plan` produce appropriate events
+
+### E2E Tests
+
+4. **TUI ACP Mode Startup** (`tui-pty-e2e/tests/acp_mode.rs`)
+   - Launch TUI with `--model mock-model`
+   - Verify TUI starts in ACP mode
+   - Verify mock agent subprocess is spawned
+   - Send input, verify response appears in chat
+
+5. **ACP Approval Flow** (`tui-pty-e2e/tests/acp_mode.rs`)
+   - Launch TUI with mock agent that requests permission
+   - Verify approval popup appears
+   - Send approval keystroke
+   - Verify agent receives approval and continues
+
+6. **ACP Tool Calls Display** (`tui-pty-e2e/tests/acp_tool_calls.rs`)
+   - Launch TUI with agent that makes tool calls
+   - Verify tool call is displayed in the TUI
+   - Verify tool result is displayed
+
+NOTE: I will write all tests before I add any implementation behavior.
+
+---
+
+## Part 1: ACP Crate Structure
+
+The `acp/` crate is already structured correctly. This section documents the existing architecture.
+
+### File Inventory
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `acp/src/lib.rs` | Module exports and re-exports | ✅ Complete |
+| `acp/src/registry.rs` | Agent configuration lookup by model name | ✅ Complete |
+| `acp/src/connection.rs` | Subprocess spawning, JSON-RPC I/O, worker thread | ✅ Complete |
+| `acp/src/translator.rs` | ACP ↔ Codex type conversion | ✅ Complete |
+| `acp/src/tracing_setup.rs` | File-based logging for ACP operations | ✅ Complete |
+| `acp/src/backend.rs` | Backend adapter mimicking CodexConversation interface | 🚧 New |
+
+### Key Types
+
+```
+AcpBackend           - Backend adapter providing CodexConversation-compatible interface
+AcpConnection        - Thread-safe wrapper around agent subprocess
+AcpAgentConfig       - Command/args to spawn agent (from registry)
+AcpProviderInfo      - Retry settings, timeouts (mirrors ModelProviderInfo)
+```
+
+---
+
+## Part 2: TUI Integration (Minimal Changes)
+
+The key insight is that the TUI already has a clean abstraction boundary: `spawn_agent()` returns
+`UnboundedSender<Op>`, and all events flow back via `AppEvent::CodexEvent(Event)`. By creating
+a backend adapter in the ACP crate that implements this same interface, we minimize TUI changes
+to a single file.
+
+### 2.1 Backend Adapter (New File: `acp/src/backend.rs`)
+
+Create an adapter that provides the same interface pattern as `CodexConversation`:
+
+**Interface:**
 ```rust
-todo!("ACP streaming not yet implemented")
-```
-
-### Target Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                       codex-core                                │
-│ ┌─────────────────────────────────────────────────────────────┐ │
-│ │                     ModelClient                             │ │
-│ │  stream() → ResponseStream<ResponseEvent>                   │ │
-│ └─────────────────────────────────────────────────────────────┘ │
-│                             │                                   │
-│                             ▼                                   │
-│ ┌─────────────────────────────────────────────────────────────┐ │
-│ │                   AcpClientAdapter                          │ │
-│ │  Converts ACP SessionUpdate → ResponseEvent                 │ │
-│ └─────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       codex-acp                                 │
-│ ┌─────────────────────────────────────────────────────────────┐ │
-│ │                    AcpConnection                            │ │
-│ │  - Manages agent subprocess lifecycle                       │ │
-│ │  - Handles initialization handshake                         │ │
-│ │  - Routes JSON-RPC messages                                 │ │
-│ └─────────────────────────────────────────────────────────────┘ │
-│                             │                                   │
-│ ┌─────────────────────────────────────────────────────────────┐ │
-│ │                    AcpSession                               │ │
-│ │  - Per-session state (modes, models)                        │ │
-│ │  - Session-scoped operations                                │ │
-│ └─────────────────────────────────────────────────────────────┘ │
-│                             │                                   │
-│ ┌─────────────────────────────────────────────────────────────┐ │
-│ │                  ClientDelegate                             │ │
-│ │  - Implements acp::Client trait                             │ │
-│ │  - Handles agent→client requests                            │ │
-│ │  - Permission requests, file I/O, terminals                 │ │
-│ └─────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                     ┌─────────────────┐
-                     │  Agent Process  │
-                     │  (via stdio)    │
-                     └─────────────────┘
-```
-
-## Implementation Tasks
-
-### Phase 1: Create `AcpConnection` struct
-**File:** `codex-rs/acp/src/connection.rs`
-
-```rust
-pub struct AcpConnection {
-    connection: acp::ClientSideConnection,
-    agent_capabilities: acp::AgentCapabilities,
-    child: tokio::process::Child,
-    _io_task: tokio::task::JoinHandle<Result<(), acp::Error>>,
-    _stderr_task: tokio::task::JoinHandle<()>,
+pub struct AcpBackend {
+    connection: AcpConnection,
+    session_id: SessionId,
+    event_tx: mpsc::Sender<Event>,
 }
 
-impl AcpConnection {
-    pub async fn spawn(config: &AcpAgentConfig, cwd: &Path) -> Result<Self>;
-    pub fn capabilities(&self) -> &acp::AgentCapabilities;
+impl AcpBackend {
+    /// Spawn ACP connection, create session, and return adapter
+    pub async fn spawn(
+        config: &Config,
+        event_tx: mpsc::Sender<Event>,
+    ) -> Result<Self>;
+
+    /// Submit an operation (mirrors CodexConversation::submit)
+    pub async fn submit(&self, op: Op) -> Result<String>;
+
+    /// Internal: translates ACP SessionUpdates to codex_protocol::Event
+    /// and sends them via event_tx
 }
 ```
 
-**Key responsibilities:**
-- Spawn agent subprocess with proper environment
-- Initialize JSON-RPC transport over stdin/stdout
-- Perform ACP initialization handshake
-- Version negotiation (minimum V1)
-- Store agent capabilities for later use
+**Internal Flow:**
+1. Spawn `AcpConnection` using model name from config
+2. Create session on startup
+3. Send synthetic `SessionConfigured` event for TUI initialization
+4. Spawn internal task that:
+   - Receives ACP `SessionUpdate` from connection
+   - Translates to `codex_protocol::protocol::Event` variants (not `TranslatedEvent`)
+   - Sends via `event_tx` as `AppEvent::CodexEvent`
+5. When approval request received from ACP:
+   - Translate to `Event { msg: EventMsg::ExecApprovalRequest(...) }`
+   - Send via `event_tx`
+   - Store pending approval state
+6. When `Op::ReviewExecApproval` received:
+   - Translate to ACP `RequestPermissionOutcome`
+   - Respond to stored pending approval
 
-**Reference:** `zed/crates/agent_servers/src/acp.rs:82-220`
+**Op Translation:**
+| Codex Op | ACP Action |
+|----------|------------|
+| `Op::UserInput { items }` | Extract text, call `connection.prompt()` |
+| `Op::Interrupt` | Call `connection.cancel()` |
+| `Op::ReviewExecApproval { decision }` | Send decision to pending approval |
+| `Op::Compact`, `Op::Undo`, etc. | Log warning, ignore (not supported) |
 
-### Phase 2: Create `AcpSession` struct
-**File:** `codex-rs/acp/src/session.rs`
+### 2.2 Agent Spawning (Single Branch Point)
 
-```rust
-pub struct AcpSession {
-    session_id: acp::SessionId,
-    modes: Option<acp::SessionModeState>,
-    update_tx: mpsc::Sender<acp::SessionUpdate>,
-}
-```
+**File:** `tui/src/chatwidget/agent.rs`
 
-**Key responsibilities:**
-- Track per-session state
-- Store optional session modes
-- Provide channel for update streaming
-
-### Phase 3: Implement `ClientDelegate`
-**File:** `codex-rs/acp/src/client_delegate.rs`
-
-```rust
-pub struct ClientDelegate {
-    sessions: Arc<RwLock<HashMap<acp::SessionId, AcpSession>>>,
-    permission_handler: Box<dyn PermissionHandler>,
-    file_handler: Box<dyn FileHandler>,
-}
-
-#[async_trait]
-impl acp::Client for ClientDelegate {
-    async fn request_permission(&self, req: RequestPermissionRequest)
-        -> Result<RequestPermissionResponse, acp::Error>;
-    async fn write_text_file(&self, req: WriteTextFileRequest)
-        -> Result<WriteTextFileResponse, acp::Error>;
-    async fn read_text_file(&self, req: ReadTextFileRequest)
-        -> Result<ReadTextFileResponse, acp::Error>;
-    async fn session_notification(&self, notif: SessionNotification)
-        -> Result<(), acp::Error>;
-    // Terminal methods (initially stubbed)
-    async fn create_terminal(&self, req: CreateTerminalRequest)
-        -> Result<CreateTerminalResponse, acp::Error>;
-    async fn terminal_output(&self, req: TerminalOutputRequest)
-        -> Result<TerminalOutputResponse, acp::Error>;
-    async fn kill_terminal_command(&self, req: KillTerminalCommandRequest)
-        -> Result<KillTerminalCommandResponse, acp::Error>;
-    async fn release_terminal(&self, req: ReleaseTerminalRequest)
-        -> Result<ReleaseTerminalResponse, acp::Error>;
-    async fn wait_for_terminal_exit(&self, req: WaitForTerminalExitRequest)
-        -> Result<WaitForTerminalExitResponse, acp::Error>;
-}
-```
-
-### Phase 4: Create `SessionUpdateTranslator`
-**File:** `codex-rs/acp/src/translator.rs`
-
-Maps ACP `SessionUpdate` variants to codex `ResponseEvent` and `EventMsg`:
-
-| ACP SessionUpdate | ResponseEvent / EventMsg |
-|-------------------|-------------------------|
-| `AgentMessageChunk(ContentBlock::Text)` | `OutputTextDelta(String)` |
-| `AgentMessageChunk(ContentBlock::Resource)` | `OutputItemDone(ResponseItem::Resource)` |
-| `AgentThoughtChunk` | `ReasoningContentDelta` |
-| `ToolCall` | `EventMsg::ExecCommandBegin` / custom tool events |
-| `ToolCallUpdate` | `EventMsg::ExecCommandEnd` / tool result events |
-| `Plan` | Custom plan event handling |
-| `UserMessageChunk` | Echo handling (typically ignored) |
-| `CurrentModeUpdate` | Mode change notification |
-| `AvailableCommandsUpdate` | Slash command updates |
+This is the **only TUI file modified**. Add mode detection and branch:
 
 ```rust
-pub struct SessionUpdateTranslator;
-
-impl SessionUpdateTranslator {
-    pub fn translate(update: acp::SessionUpdate) -> Vec<ResponseEvent>;
-    fn translate_tool_call(tc: acp::ToolCall) -> Vec<ResponseEvent>;
-    fn translate_tool_call_update(tcu: acp::ToolCallUpdate) -> Vec<ResponseEvent>;
-}
-```
-
-### Phase 5: Create `AcpStreamAdapter`
-**File:** `codex-rs/acp/src/stream_adapter.rs`
-
-```rust
-pub struct AcpStreamAdapter {
-    update_rx: mpsc::Receiver<acp::SessionUpdate>,
-    translator: SessionUpdateTranslator,
+pub(crate) fn spawn_agent(
+    config: Config,
+    app_event_tx: AppEventSender,
+    server: Arc<ConversationManager>,
+) -> UnboundedSender<Op> {
+    // Detect ACP mode based on model name
+    if codex_acp::get_agent_config(&config.model).is_ok() {
+        spawn_acp_agent(config, app_event_tx)
+    } else {
+        spawn_http_agent(config, app_event_tx, server)  // existing code, renamed
+    }
 }
 
-impl Stream for AcpStreamAdapter {
-    type Item = Result<ResponseEvent>;
+fn spawn_acp_agent(config: Config, app_event_tx: AppEventSender) -> UnboundedSender<Op> {
+    let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>>;
-}
-```
-
-### Phase 6: Integration with codex-core
-
-#### Implement `stream_acp()` function
-**File:** `codex-rs/core/src/client.rs`
-
-Replace the `todo!()` at line 173 with:
-
-```rust
-async fn stream_acp(
-    config: &AcpAgentConfig,
-    messages: Vec<ChatMessage>,
-    cwd: &Path,
-    permission_handler: impl PermissionHandler,
-) -> Result<ResponseStream> {
-    let (tx, rx) = mpsc::channel(32);
-
-    // Spawn fresh connection for this session
-    let connection = AcpConnection::spawn(config, cwd).await?;
-
-    // Create session
-    let session_id = connection.create_session(cwd).await?;
-
-    // Convert messages to ACP prompt format
-    let prompt = convert_to_acp_prompt(&messages)?;
-
-    // Spawn prompt task
     tokio::spawn(async move {
-        let result = connection.prompt(session_id, prompt, tx).await;
-        // Handle completion - connection dropped when task ends
+        // Create event channel for backend → TUI
+        let (event_tx, mut event_rx) = mpsc::channel(32);
+
+        let backend = match codex_acp::AcpBackend::spawn(&config, event_tx).await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!("failed to spawn ACP backend: {e}");
+                return;
+            }
+        };
+
+        // Forward ops to backend (same pattern as HTTP mode)
+        let backend_ref = backend.clone();
+        tokio::spawn(async move {
+            while let Some(op) = codex_op_rx.recv().await {
+                if let Err(e) = backend_ref.submit(op).await {
+                    tracing::error!("failed to submit op: {e}");
+                }
+            }
+        });
+
+        // Forward events to TUI (same pattern as HTTP mode)
+        while let Some(event) = event_rx.recv().await {
+            app_event_tx.send(AppEvent::CodexEvent(event));
+        }
     });
 
-    Ok(ResponseStream { rx_event: rx })
+    codex_op_tx
+}
+
+// Existing spawn_agent code becomes spawn_http_agent (unchanged logic)
+fn spawn_http_agent(
+    config: Config,
+    app_event_tx: AppEventSender,
+    server: Arc<ConversationManager>,
+) -> UnboundedSender<Op> {
+    // ... existing implementation unchanged ...
 }
 ```
 
-### Phase 7: Cancellation Support
+### 2.3 Event Loop (NO CHANGES)
 
-#### Implement cancellation
-**File:** `codex-rs/acp/src/connection.rs`
-
+The TUI event loop in `app.rs` remains **completely unchanged**:
 ```rust
-impl AcpConnection {
-    pub async fn cancel(&self, session_id: &acp::SessionId) -> Result<()> {
-        self.connection.cancel(acp::CancelNotification::new(session_id.clone())).await
+loop {
+    select! {
+        Some(event) = app_event_rx.recv() => {
+            app.handle_event(tui, event).await?
+        }
+        Some(event) = tui_events.next() => {
+            app.handle_tui_event(tui, event).await?
+        }
     }
 }
 ```
 
-Integrate with codex's existing cancellation mechanism (Ctrl+C handling).
+Events from both HTTP and ACP backends flow through `AppEvent::CodexEvent(Event)`.
 
-## File Structure
+### 2.4 Approval Bridging (NO TUI CHANGES)
 
+Approvals work identically to HTTP mode from the TUI's perspective:
+
+1. ACP backend receives `RequestPermissionRequest` from agent
+2. Backend translates to `Event { msg: EventMsg::ExecApprovalRequest(...) }`
+3. Backend sends event via `event_tx` → TUI receives as `AppEvent::CodexEvent`
+4. TUI displays approval popup using **existing `approval_overlay.rs`** (no changes)
+5. User approves → TUI calls `submit_op(Op::ReviewExecApproval { decision })`
+6. Backend receives Op, translates to ACP `RequestPermissionOutcome`, responds to agent
+
+**No changes needed to `approval_overlay.rs` or any other approval-related TUI code.**
+
+### 2.5 TUI Files Summary
+
+| File | Change |
+|------|--------|
+| `tui/src/chatwidget/agent.rs` | **Modified** - Add mode detection, `spawn_acp_agent()` |
+| `tui/src/lib.rs` | No changes |
+| `tui/src/app.rs` | No changes |
+| `tui/src/chatwidget.rs` | No changes |
+| `tui/src/bottom_pane/approval_overlay.rs` | No changes |
+
+**Total TUI files modified: 1**
+
+---
+
+## Part 3: Model Picker
+
+### 3.1 Separate Registries
+
+**HTTP Registry:** `core/src/model_provider_info.rs::built_in_model_providers()`
+- OpenAI, Anthropic, Azure, OSS providers
+- NOT modified for ACP
+
+**ACP Registry:** `acp/src/registry.rs::get_agent_config()`
+- `mock-model` → `mock_acp_agent` binary
+- `gemini-2.5-flash` / `gemini-acp` → `npx @google/gemini-cli --experimental-acp`
+- `claude` / `claude-acp` → `npx @zed-industries/claude-code-acp`
+
+### 3.2 Model Selection (MVP: CLI-Only)
+
+For the MVP, model selection is handled via CLI argument only:
+
+**Usage:**
+```bash
+# HTTP mode (existing behavior)
+codex --model gpt-4o
+
+# ACP mode (detected automatically from registry)
+codex --model gemini-acp
+codex --model claude-acp
+codex --model mock-model
 ```
-codex-rs/acp/src/
-├── lib.rs                 # Module exports
-├── registry.rs            # Existing: agent config registry
-├── connection.rs          # NEW: AcpConnection (subprocess management)
-├── session.rs             # NEW: AcpSession (session state)
-├── client_delegate.rs     # NEW: acp::Client implementation
-├── translator.rs          # NEW: SessionUpdate → ResponseEvent
-├── stream_adapter.rs      # NEW: Stream wrapper for ResponseStream
-└── handlers.rs            # NEW: Permission/File handler traits
-```
 
-## Dependencies
+**Detection Logic (in `agent.rs`):**
+1. Read `config.model` from CLI/config
+2. Call `codex_acp::get_agent_config(&config.model)`
+3. If `Ok(_)` → ACP mode
+4. If `Err(_)` → HTTP mode
 
-Add to `codex-rs/acp/Cargo.toml`:
-```toml
-[dependencies]
-agent-client-protocol = "0.7"  # Already present
-tokio = { workspace = true, features = ["process", "sync"] }
-futures = { workspace = true }
-async-trait = { workspace = true }
-```
+**No TUI picker changes required.** The existing model picker continues to work for HTTP
+providers. ACP agents are selected via `--model` flag.
 
-## Testing Strategy
+### 3.3 Future Enhancement: Unified Picker (Deferred)
 
-### Unit Tests
-1. `SessionUpdateTranslator` - Test all mapping cases
-2. `ClientDelegate` - Mock permission/file handlers
-3. Connection initialization handshake
+A future iteration could add a unified picker showing both HTTP and ACP options:
+- Create `tui/src/model_picker.rs` that queries both registries
+- Display with clear categorization (HTTP vs ACP)
+- Return either `ModelProviderInfo` or `AcpAgentConfig`
 
-### Integration Tests
-1. Use `mock-acp-agent` for full protocol tests
-2. Test session lifecycle (new → prompt → cancel)
-3. Test permission request flow
+This is **out of scope for MVP** to minimize TUI changes.
 
-### E2E Tests
-The reference tests are in `codex-rs/tui-pty-e2e/tests/prompt_flow.rs`. These tests spawn the full TUI and verify that prompts flow through to the mock agent and responses are displayed.
+---
 
-## Out of Scope (Deferred)
+## Part 4: Config Reuse
 
-1. **Authentication** - Agents requiring auth can authenticate out-of-band initially
-2. **Session Loading** - `session/load` for resuming sessions
-3. **Session Listing** - `session/list` capability (unstable feature)
-4. **Model Selection** - `session/set_model` (unstable feature)
-5. **Terminal rendering** - Terminal UI handled by TUI, not ACP client
-6. **MCP server configuration** - Pass empty MCP servers initially
-7. **Connection pooling** - Spawn per session instead
-8. **Advanced permission bridge** - Basic bridge only
-9. **Advanced tool call mapping** - Basic mapping only
+### 4.1 Shared Config Fields
 
-## Implementation Order
+These `Config` fields are applicable to ACP and should be read:
 
-1. **Phase 1**: Create `AcpConnection` struct (connection.rs)
-2. **Phase 2**: Create `AcpSession` struct (session.rs)
-3. **Phase 3**: Implement `ClientDelegate` (client_delegate.rs)
-4. **Phase 4**: Create `SessionUpdateTranslator` (translator.rs)
-5. **Phase 5**: Create `AcpStreamAdapter` (stream_adapter.rs)
-6. **Phase 6**: Integration with codex-core client.rs (replace todo!())
-7. **Phase 7**: Cancellation support
+| Field | Usage in ACP |
+|-------|--------------|
+| `approval_policy` | Whether to show approval popup or auto-approve |
+| `sandbox_policy` | Passed to agent (if agent supports) |
+| `cwd` | Working directory for agent subprocess |
+| `mcp_servers` | Passed to agent in `NewSessionRequest` |
 
-## Verification Criteria
+### 4.2 Ignored Config Fields
 
-1. E2E tests in `codex-rs/tui-pty-e2e/tests/prompt_flow.rs` pass
-2. Can connect to mock-acp-agent and complete a prompt turn
-3. SessionUpdate events properly translate to ResponseEvent stream
-4. Permission requests properly flow through to TUI/CLI
-5. Cancellation (Ctrl+C) properly terminates agent operations
+These `Config` fields are NOT applicable to ACP:
 
-## Key Decision Points (Resolved)
+| Field | Reason |
+|-------|--------|
+| `model`, `model_family` | Replaced by ACP agent selection |
+| `model_provider`, `model_provider_id` | Replaced by ACP registry |
+| `reasoning_effort` | Agent handles internally |
+| `base_instructions`, `user_instructions` | Agent has own prompts |
+| `tools`, `features` | Agent provides own tools |
 
-1. **Connection lifecycle**: ✅ Spawn per session (simpler, fresh state)
+---
 
-2. **Permission handler interface**: ✅ Bridge to existing codex approval types (consistent UX)
+## Part 5: Edge Cases
 
-3. **Tool call content**: ✅ Pass through to TUI for rendering (avoid duplication)
+### 5.1 Agent Subprocess Crashes
 
-4. **Error handling**: Map to `anyhow::Error` with context for consistency
+**Scenario:** Agent process exits unexpectedly during prompt.
+
+**Detection:** `command_rx.recv()` returns `None` in worker thread.
+
+**Handling:**
+1. Worker thread exits `run_command_loop()`
+2. All pending oneshot channels are dropped
+3. `AcpBackend` sends `Event { msg: EventMsg::Error(...) }` via `event_tx`
+4. TUI displays error message to user (existing error handling)
+5. User can restart with new agent
+
+### 5.2 Agent Hangs (No Response)
+
+**Scenario:** Agent stops sending SessionUpdates but doesn't exit.
+
+**Detection:** Stream idle timeout from `AcpProviderInfo::stream_idle_timeout` (default 5 minutes).
+
+**Handling:**
+1. Prompt method returns timeout error
+2. Backend sends error event
+3. TUI displays error, user can cancel via existing Ctrl+C handling
+
+### 5.3 Approval Channel Closed
+
+**Scenario:** TUI closes before responding to approval.
+
+**Handling:** `AcpBackend` detects dropped receiver, falls back to auto-approve (first option).
+
+### 5.4 User Closes TUI During Approval
+
+**Scenario:** User closes TUI while approval popup is displayed.
+
+**Handling:** Backend's pending approval response channel is dropped, agent receives deny (last option).
+
+### 5.5 MCP Server Configuration
+
+**Scenario:** User has MCP servers configured in `config.toml`.
+
+**Handling:**
+1. Read `config.mcp_servers` during `AcpBackend::spawn()`
+2. Pass to `AcpConnection::create_session()` in `NewSessionRequest::mcp_servers`
+3. Agent handles MCP server lifecycle
+
+### 5.6 Unknown Model Name
+
+**Scenario:** User specifies `--model unknown-xyz`.
+
+**Handling:**
+1. `get_agent_config()` returns `Err`
+2. Fall through to HTTP mode in `spawn_agent()`
+3. If HTTP mode also fails, codex-core handles error display
+
+---
+
+## Testing Details
+
+Tests verify **behavior**, not implementation:
+
+1. **Connection Lifecycle** - Verifies that spawning an agent, creating a session, and sending prompts produces expected responses (not just that channels work)
+
+2. **Approval Flow** - Verifies that when an agent requests permission, the user's approval/denial decision is correctly translated and sent back (tests the full round-trip, not just translation functions)
+
+3. **Event Translation** - Verifies that agent messages appear as text in the TUI (tests observable output, not internal enums)
+
+4. **Error Recovery** - Verifies that agent crashes produce user-visible error messages (tests UX, not exception handling)
+
+---
+
+## Implementation Details
+
+- Worker thread uses `tokio::task::LocalSet` for !Send futures from `agent-client-protocol`
+- Approval bridging translates between ACP's option-based model (multiple choices) and Codex's binary model (approve/deny)
+- `AcpBackend` produces `codex_protocol::Event` directly (no intermediate `TranslatedEvent` visible to TUI)
+- Config loading reuses `codex_core::config::Config` but only reads applicable fields
+- E2E tests use `mock_acp_agent` binary that sends deterministic responses
+- MCP servers from config are passed to agent; agent manages server lifecycle
+- Stderr from agent subprocess is captured and logged via tracing
+- All ACP operations are logged to `.codex-acp.log` for debugging
+
+---
+
+## Summary: Changes by Crate
+
+| Crate | Files Changed | Description |
+|-------|---------------|-------------|
+| `codex_acp` | `backend.rs` (new) | Backend adapter providing TUI-compatible interface |
+| `codex_acp` | `translator.rs` (extended) | Add functions to produce `codex_protocol::Event` |
+| `codex_acp` | `lib.rs` | Export new types |
+| `codex_tui` | `chatwidget/agent.rs` | Single branch point for ACP vs HTTP |
+| `codex_core` | (none) | Zero changes |
+| `codex_protocol` | (none) | Zero changes |
+
+**Total files modified: 4** (3 in acp crate, 1 in tui crate)
