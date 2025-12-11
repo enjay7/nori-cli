@@ -13,7 +13,7 @@ name = "codex_tui"
 path = "src/lib.rs"
 
 [features]
-default = []
+default = ["unstable"]
 
 # Full feature set - enables all upstream/legacy functionality
 full = ["login", "feedback", "backend-client", "upstream-updates", "oss-providers"]
@@ -22,6 +22,8 @@ full = ["login", "feedback", "backend-client", "upstream-updates", "oss-provider
 vt100-tests = []
 # Gate verbose debug logging inside the TUI implementation.
 debug-logs = []
+# Enable unstable ACP features like model switching.
+unstable = ["codex-acp/unstable"]
 
 # ChatGPT/API login functionality
 login = ["dep:codex-login"]
