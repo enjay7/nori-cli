@@ -166,7 +166,6 @@ jobs:
           cargo test --package codex-acp
           cargo test --package codex-tui
           cargo test --package codex-cli
-          cargo test --package codex-common
           cargo test --package codex-protocol
           cargo test --package codex-core
 

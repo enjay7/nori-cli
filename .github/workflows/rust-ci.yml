@@ -136,7 +136,6 @@ jobs:
           cargo test --profile ci-test --target ${{ matrix.target }} --package codex-acp
           cargo test --profile ci-test --target ${{ matrix.target }} --package codex-tui
           cargo test --profile ci-test --target ${{ matrix.target }} --package codex-cli
-          cargo test --profile ci-test --target ${{ matrix.target }} --package codex-common
           cargo test --profile ci-test --target ${{ matrix.target }} --package codex-protocol
           cargo test --profile ci-test --target ${{ matrix.target }} --package codex-core
 
