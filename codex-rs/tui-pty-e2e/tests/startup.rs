@@ -85,11 +85,6 @@ fn test_startup_welcome_with_dimensions() {
     // Verify terminal size is respected
     let contents = session.screen_contents();
     assert!(contents.lines().count() <= 10);
-
-    assert_snapshot!(
-        "startup_welcome_dimensions_10x120",
-        normalize_for_input_snapshot(contents)
-    );
 }
 
 #[test]

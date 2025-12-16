@@ -298,6 +298,9 @@ jobs:
 
       - name: Create npm package
         run: |
+          # Install tree for directory visualization
+          sudo apt-get update && sudo apt-get install -y tree
+
           VERSION="${{ needs.validate.outputs.version }}"
           PACKAGE_NAME="${{ env.NPM_PACKAGE_NAME }}"
 
@@ -322,6 +325,13 @@ jobs:
           cd "$STAGING_DIR"
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           cd -
+
+          # Show staging directory contents
+          echo "## Staging Directory Contents" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tree "$STAGING_DIR" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
           # cat > "$STAGING_DIR/package.json" << EOF
           # {
           #   "name": "$PACKAGE_NAME",
