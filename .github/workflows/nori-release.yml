@@ -131,20 +131,19 @@ jobs:
           toolchain: "1.90.0"
           components: clippy
 
-      - name: Run cargo build
-        working-directory: codex-rs
-        run: cargo build
-
-      - name: Run cargo check
+      - name: cargo check
         working-directory: codex-rs
         run: cargo check --all-targets
 
-      - name: Run cargo clippy
+      - name: cargo clippy
         working-directory: codex-rs
-        # needs all features to avoid unused import/var/etc errors
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets # needs all features to avoid unused import/var/etc errors
 
-      - name: Run cargo test
+      - name: cargo build
+        working-directory: codex-rs
+        run: cargo build -p codex-cli && cargo build -p mock-acp-agent
+
+      - name: cargo test
         working-directory: codex-rs
         run: |
           cargo test --package tui-pty-e2e
