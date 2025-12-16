@@ -163,7 +163,7 @@ jobs:
         working-directory: codex-rs
         run: |
           cargo test --package tui-pty-e2e
-          cargo test --package acp
+          cargo test --package codex-acp
           cargo test --package codex-tui
           cargo test --package codex-cli
           cargo test --package codex-common
