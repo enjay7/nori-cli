@@ -127,12 +127,9 @@ jobs:
         run: |
           mkdir -p target/mock-acp-out # build mock-acp-agent to a known location for E2E tests
           cargo +nightly build -p mock-acp-agent --profile ci-test --target ${{ matrix.target }} --artifact-dir target/mock-acp-out -Z unstable-options
+          cargo build -p codex-cli --profile ci-test --target ${{ matrix.target }}
 
-      - name: cargo build
-        working-directory: codex-rs
-        run: cargo build -p codex-cli
-
-      - name: cargo test all
+      - name: cargo test nori
         env:
           MOCK_ACP_AGENT_BIN: ${{ github.workspace }}/codex-rs/target/mock-acp-out/mock_acp_agent
         run: |
@@ -143,6 +140,7 @@ jobs:
           cargo test --profile ci-test --target ${{ matrix.target }} --package codex-common
           cargo test --profile ci-test --target ${{ matrix.target }} --package codex-protocol
           cargo test --profile ci-test --target ${{ matrix.target }} --package codex-core
+
 
       - name: cargo test all
         continue-on-error: true
