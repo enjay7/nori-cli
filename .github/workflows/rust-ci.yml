@@ -50,6 +50,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@nightly
         with:
+          targets: ${{ matrix.target }}
           components: rustfmt
 
       - name: Compute lockfile hash
