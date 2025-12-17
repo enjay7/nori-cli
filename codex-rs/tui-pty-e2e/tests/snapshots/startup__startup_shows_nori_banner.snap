@@ -1,6 +1,6 @@
 ---
 source: tui-pty-e2e/tests/startup.rs
-expression: "normalize_for_input_snapshot(lines.collect::<Vec<&str>>()[1..11].join(\"\\n\"))"
+expression: "normalize_for_input_snapshot(lines.collect::<Vec<&str>>()[1..8].join(\"\\n\"))"
 ---
 │ Nori v0.0.0                │
 │                            │
@@ -8,6 +8,3 @@ expression: "normalize_for_input_snapshot(lines.collect::<Vec<&str>>()[1..11].jo
 │ agent:     mock-model      │
 │ profile:   [PROF]          │
 ╰────────────────────────────╯
-
-
-  🍙 Powered by Nori AI 🍙

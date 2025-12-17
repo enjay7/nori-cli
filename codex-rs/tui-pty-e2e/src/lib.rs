@@ -242,9 +242,9 @@ impl TuiSession {
             // Also set NORI_HOME for nori-config feature support
             cmd.env("NORI_HOME", codex_home.to_str().unwrap());
 
-            // Write config.toml to CODEX_HOME
+            // Write config.toml to CODEX_HOME (unless explicitly empty for first-launch testing)
             let config_path = codex_home.join("config.toml");
-            let config_content = config.config_toml.unwrap_or_else(|| {
+            let config_content = config.config_toml.clone().unwrap_or_else(|| {
                 // Generate default config with model, trusted project path,
                 // and mock_provider that doesn't require OpenAI auth
                 let cwd_path = config
@@ -272,12 +272,50 @@ name = "Mock ACP provider for tests"
                     acp_section = acp_section
                 )
             });
-            std::fs::write(&config_path, config_content)?;
+            // Only write config file if content is non-empty. Empty string means
+            // "no config file" which is needed to test the first-launch welcome screen.
+            if !config_content.is_empty() {
+                std::fs::write(&config_path, config_content)?;
+            }
         }
 
         // Pass through mock agent env vars
         for (key, value) in config.mock_agent_env {
             cmd.env(&key, &value);
+        }
+
+        // Build PATH: filter excluded binaries, then prepend extra directories
+        if !config.extra_path.is_empty() || !config.exclude_binaries.is_empty() {
+            let current_path = std::env::var("PATH").unwrap_or_default();
+
+            // Filter out directories containing excluded binaries
+            let filtered_dirs: Vec<&str> = if config.exclude_binaries.is_empty() {
+                current_path.split(':').collect()
+            } else {
+                current_path
+                    .split(':')
+                    .filter(|dir| {
+                        !config
+                            .exclude_binaries
+                            .iter()
+                            .any(|binary| std::path::Path::new(dir).join(binary).exists())
+                    })
+                    .collect()
+            };
+
+            // Prepend extra directories
+            let extra_paths: Vec<String> = config
+                .extra_path
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+
+            let new_path = if extra_paths.is_empty() {
+                filtered_dirs.join(":")
+            } else {
+                format!("{}:{}", extra_paths.join(":"), filtered_dirs.join(":"))
+            };
+            cmd.env("PATH", new_path);
         }
 
         // Disable color codes for easier parsing
@@ -606,6 +644,11 @@ pub struct SessionConfig {
     /// When true, allows falling back to HTTP providers if model is not in ACP registry.
     /// When false (default), ACP-only mode: unregistered models produce an error.
     pub allow_http_fallback: bool,
+    /// Extra directories to prepend to PATH when spawning the process.
+    pub extra_path: Vec<std::path::PathBuf>,
+    /// Binary names to exclude from PATH (filters out directories containing these binaries).
+    /// Useful for testing behavior when certain commands are "not installed".
+    pub exclude_binaries: Vec<String>,
 }
 
 impl Default for SessionConfig {
@@ -627,6 +670,8 @@ impl SessionConfig {
             config_toml: None,
             git_init: true,
             allow_http_fallback: false, // Default to ACP-only mode for tests
+            extra_path: Vec::new(),
+            exclude_binaries: Vec::new(),
         }
     }
 
@@ -696,6 +741,19 @@ impl SessionConfig {
         // This prevents the "Snapshots disabled" BackgroundEvent from racing
         // with the "Working" status indicator during streaming tests.
         self.git_init = false;
+        self
+    }
+
+    /// Add an extra directory to prepend to PATH when spawning the process.
+    pub fn with_extra_path(mut self, path: std::path::PathBuf) -> Self {
+        self.extra_path.push(path);
+        self
+    }
+
+    /// Exclude directories containing a specific binary from PATH.
+    /// Useful for testing behavior when certain commands are "not installed".
+    pub fn with_excluded_binary(mut self, binary_name: impl Into<String>) -> Self {
+        self.exclude_binaries.push(binary_name.into());
         self
     }
 }
@@ -832,22 +890,29 @@ pub fn normalize_for_input_snapshot(contents: String) -> String {
     // The header can appear in two forms:
     // 1. Boxed header with "╭──" border
     // 2. Plain text "Powered by Nori AI"
-    // Both end with a nori-ai install command
+    // The header ends with either:
+    // - nori-ai install command (when nori-ai is not installed)
+    // - "Powered by Nori AI" line (when nori-ai is already installed)
     let lines: Vec<&str> = normalized.lines().collect();
 
     // Detect if header is present (either boxed or plain text form)
     let has_header = lines
         .iter()
-        .any(|l| l.contains("╭──") || l.contains("'npx nori-ai install'"));
+        .any(|l| l.contains("╭──") || l.contains("Powered by Nori AI"));
 
     if has_header {
-        // Find where the header ends (after the /review command line)
+        // Find where the header ends
         let mut skip_until = 0;
         for (i, line) in lines.iter().enumerate() {
-            // The nori-ai install line marks the end of the command list
+            // The nori-ai install line marks the end of the command list (if present)
             if line.contains("'npx nori-ai install'") {
                 skip_until = i + 1;
                 break;
+            }
+            // If no install line, use "Powered by Nori AI" as the end marker
+            if line.contains("Powered by Nori AI") {
+                skip_until = i + 1;
+                // Don't break yet - install line may follow
             }
         }
         // Skip empty lines after the header block
