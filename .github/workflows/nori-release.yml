@@ -255,6 +255,16 @@ jobs:
           echo "CC_x86_64_linux_android=$NDK_TOOLCHAIN/x86_64-linux-android30-clang" >> $GITHUB_ENV
           echo "AR_x86_64_linux_android=$NDK_TOOLCHAIN/llvm-ar" >> $GITHUB_ENV
 
+          # Create symlinks for cross-compilation tools that openssl-src expects
+          # OpenSSL build scripts look for <target>-ranlib, <target>-ar, etc.
+          ln -sf "$NDK_TOOLCHAIN/llvm-ranlib" "$NDK_TOOLCHAIN/aarch64-linux-android-ranlib"
+          ln -sf "$NDK_TOOLCHAIN/llvm-ranlib" "$NDK_TOOLCHAIN/x86_64-linux-android-ranlib"
+          ln -sf "$NDK_TOOLCHAIN/llvm-ar" "$NDK_TOOLCHAIN/aarch64-linux-android-ar"
+          ln -sf "$NDK_TOOLCHAIN/llvm-ar" "$NDK_TOOLCHAIN/x86_64-linux-android-ar"
+
+          # Add NDK toolchain to PATH so openssl-src can find the tools
+          echo "$NDK_TOOLCHAIN" >> $GITHUB_PATH
+
           # Configure linker in cargo config
           mkdir -p ~/.cargo
           cat >> ~/.cargo/config.toml << EOF
