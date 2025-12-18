@@ -243,12 +243,20 @@ jobs:
         with:
           packages: "ndk;26.1.10909125"
 
-      - name: Configure Android linker
+      - name: Configure Android toolchain
         if: matrix.use-ndk == true
         run: |
-          mkdir -p ~/.cargo
           NDK_HOST_TAG="linux-x86_64"
           NDK_TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$NDK_HOST_TAG/bin"
+
+          # Set CC and AR for native crate builds (ring, etc.)
+          echo "CC_aarch64_linux_android=$NDK_TOOLCHAIN/aarch64-linux-android30-clang" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=$NDK_TOOLCHAIN/llvm-ar" >> $GITHUB_ENV
+          echo "CC_x86_64_linux_android=$NDK_TOOLCHAIN/x86_64-linux-android30-clang" >> $GITHUB_ENV
+          echo "AR_x86_64_linux_android=$NDK_TOOLCHAIN/llvm-ar" >> $GITHUB_ENV
+
+          # Configure linker in cargo config
+          mkdir -p ~/.cargo
           cat >> ~/.cargo/config.toml << EOF
           [target.aarch64-linux-android]
           linker = "$NDK_TOOLCHAIN/aarch64-linux-android30-clang"
