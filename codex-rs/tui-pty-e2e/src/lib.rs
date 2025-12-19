@@ -182,9 +182,30 @@ impl TuiSession {
             std::fs::write(&hello_py, "print('Hello, World!')")?;
 
             // Initialize as git repo if requested (prevents "Snapshots disabled" race)
+            // Use -b master to ensure consistent branch name regardless of system git config
             if config.git_init {
                 std::process::Command::new("git")
-                    .args(["init"])
+                    .args(["init", "-b", "master"])
+                    .current_dir(temp_dir.path())
+                    .output()?;
+
+                // Configure git user for the initial commit
+                std::process::Command::new("git")
+                    .args(["config", "user.email", "test@example.com"])
+                    .current_dir(temp_dir.path())
+                    .output()?;
+                std::process::Command::new("git")
+                    .args(["config", "user.name", "Test User"])
+                    .current_dir(temp_dir.path())
+                    .output()?;
+
+                // Add and commit the hello.py file to create a branch
+                std::process::Command::new("git")
+                    .args(["add", "."])
+                    .current_dir(temp_dir.path())
+                    .output()?;
+                std::process::Command::new("git")
+                    .args(["commit", "-m", "Initial commit"])
                     .current_dir(temp_dir.path())
                     .output()?;
             }
@@ -325,6 +346,10 @@ name = "Mock ACP provider for tests"
         if config.no_color {
             cmd.env("NO_COLOR", "1");
         }
+
+        // Force synchronous system info collection in E2E tests
+        // This ensures footer displays git branch/nori version immediately
+        cmd.env("NORI_SYNC_SYSTEM_INFO", "1");
 
         let _child = pair.slave.spawn_command(cmd)?;
 
@@ -706,7 +731,9 @@ impl SessionConfig {
             git_init: true,
             allow_http_fallback: false, // Default to ACP-only mode for tests
             extra_path: Vec::new(),
-            exclude_binaries: Vec::new(),
+            // Exclude nori-ai by default since it won't be in PATH on CI runners.
+            // Tests that need nori-ai should explicitly add it via with_extra_path().
+            exclude_binaries: vec!["nori-ai".to_string()],
         }
     }
 
