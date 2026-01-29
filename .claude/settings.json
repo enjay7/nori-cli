@@ -35,6 +35,10 @@
           ]
         }
       }
-    }
+    },
+    "additionalDirectories": [
+      "/home/clifford/Documents/source/nori/cli/.nori/profiles",
+      "/home/clifford/Documents/source/nori/cli/.claude/skills"
+    ]
   }
 }
