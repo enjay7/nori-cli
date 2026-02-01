@@ -573,10 +573,16 @@ impl ChatWidget {
     fn on_task_complete(&mut self, last_agent_message: Option<String>) {
         // If a stream is currently active, finalize it.
         self.flush_answer_stream_with_separator();
-        // Flush any queued interrupts (e.g., approval requests) that were deferred
-        // during streaming. This is necessary for ACP mode which doesn't send a
-        // separate AgentMessage event to trigger handle_stream_finished().
-        self.flush_interrupt_queue();
+        // Process any deferred completion events (ExecEnd, McpEnd, PatchEnd) so
+        // in-progress tool cells transition to their finished state ("Running" →
+        // "Ran"). Discard begin events that would create new cells below the
+        // agent's final message.
+        let mut mgr = std::mem::take(&mut self.interrupts);
+        let discarded = mgr.flush_completions_and_clear(self);
+        self.interrupts = mgr;
+        if discarded > 0 {
+            debug!("on_task_complete: discarded {discarded} deferred begin/other interrupt events");
+        }
 
         // Drain any pending ExecCells that weren't completed (e.g., due to interruption).
         self.pending_exec_cells.drain_failed();
