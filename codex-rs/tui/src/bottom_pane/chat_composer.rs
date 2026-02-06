@@ -1685,6 +1685,19 @@ impl ChatComposer {
             self.footer_mode = reset_mode_after_activity(self.footer_mode);
         }
     }
+
+    /// Get the prompt summary for status card display.
+    pub(crate) fn prompt_summary(&self) -> Option<String> {
+        self.prompt_summary.clone()
+    }
+
+    /// Get the token breakdown from transcript location (for status card display).
+    pub(crate) fn transcript_token_breakdown(&self) -> Option<codex_acp::TranscriptTokenUsage> {
+        self.system_info
+            .as_ref()
+            .and_then(|s| s.transcript_location.as_ref())
+            .and_then(|loc| loc.token_breakdown.clone())
+    }
 }
 
 impl Renderable for ChatComposer {
