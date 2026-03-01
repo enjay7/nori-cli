@@ -20,7 +20,7 @@ pub enum HistoryPersistence {
 }
 
 /// Default agent for ACP-only mode
-pub const DEFAULT_AGENT: &str = "claude-code";
+pub const DEFAULT_AGENT: &str = "kiro";
 
 // ============================================================================
 // Agent Configuration (TOML schema)

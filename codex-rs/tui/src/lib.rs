@@ -84,7 +84,7 @@ mod viewonly_transcript;
 /// Default agent for ACP-only mode when no agent is specified via CLI or config.
 /// This overrides the upstream default (gpt-5.1-codex) to use Claude for Nori.
 /// This constant MUST match codex_acp::config::DEFAULT_AGENT to ensure consistency.
-const DEFAULT_ACP_AGENT: &str = "claude-code";
+const DEFAULT_ACP_AGENT: &str = "kiro";
 
 // Nori-specific update modules
 // Re-export as pub mod for external access to UpdateAction type
