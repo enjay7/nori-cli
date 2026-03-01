@@ -41,6 +41,8 @@ pub enum AgentKind {
     Codex,
     /// Google's Gemini CLI
     Gemini,
+    /// Amazon's Kiro CLI
+    Kiro,
 }
 
 impl AgentKind {
@@ -50,6 +52,7 @@ impl AgentKind {
             AgentKind::ClaudeCode => "claude-code",
             AgentKind::Codex => "codex",
             AgentKind::Gemini => "gemini",
+            AgentKind::Kiro => "kiro",
         }
     }
 
@@ -59,6 +62,7 @@ impl AgentKind {
             AgentKind::ClaudeCode => "Claude Code",
             AgentKind::Codex => "Codex",
             AgentKind::Gemini => "Gemini",
+            AgentKind::Kiro => "Kiro",
         }
     }
 
@@ -73,6 +77,7 @@ impl AgentKind {
             AgentKind::ClaudeCode => 200_000,
             AgentKind::Codex => 258_000,
             AgentKind::Gemini => 1_000_000,
+            AgentKind::Kiro => 200_000,
         }
     }
 
@@ -82,6 +87,7 @@ impl AgentKind {
             AgentKind::ClaudeCode => Provider::Anthropic,
             AgentKind::Codex => Provider::OpenAI,
             AgentKind::Gemini => Provider::Google,
+            AgentKind::Kiro => Provider::Amazon,
         }
     }
 
@@ -91,6 +97,7 @@ impl AgentKind {
             AgentKind::ClaudeCode => "@anthropic-ai/claude-code",
             AgentKind::Codex => "@openai/codex",
             AgentKind::Gemini => "@google/gemini-cli",
+            AgentKind::Kiro => "kiro-cli",
         }
     }
 
@@ -102,12 +109,13 @@ impl AgentKind {
             AgentKind::Codex => "@zed-industries/codex-acp",
             // Gemini has native ACP support
             AgentKind::Gemini => "@google/gemini-cli",
+            AgentKind::Kiro => "kiro-cli",
         }
     }
 
     /// Get all agent variants
     pub fn all() -> &'static [AgentKind] {
-        &[AgentKind::ClaudeCode, AgentKind::Codex, AgentKind::Gemini]
+        &[AgentKind::ClaudeCode, AgentKind::Codex, AgentKind::Gemini, AgentKind::Kiro]
     }
 
     /// Get the base directory for transcript files, relative to home directory.
@@ -118,6 +126,7 @@ impl AgentKind {
             AgentKind::ClaudeCode => ".claude/projects",
             AgentKind::Codex => ".codex/sessions",
             AgentKind::Gemini => ".gemini/tmp",
+            AgentKind::Kiro => ".kiro/sessions",
         }
     }
 
@@ -129,6 +138,7 @@ impl AgentKind {
             AgentKind::ClaudeCode => "Run /login for instructions, or set ANTHROPIC_API_KEY.",
             AgentKind::Codex => "Run /login to authenticate, or set OPENAI_API_KEY.",
             AgentKind::Gemini => "Run /login for instructions, or set GOOGLE_API_KEY.",
+            AgentKind::Kiro => "Run kiro-cli in your terminal and follow login prompts.",
         }
     }
 
@@ -139,6 +149,7 @@ impl AgentKind {
             "claude-code" | "claude" | "claude-acp" | "claude-4.5" => Some(AgentKind::ClaudeCode),
             "codex" | "codex-acp" => Some(AgentKind::Codex),
             "gemini" | "gemini-acp" | "gemini-2.5-flash" => Some(AgentKind::Gemini),
+            "kiro" | "kiro-cli" | "kiro-acp" => Some(AgentKind::Kiro),
             _ => None,
         }
     }
@@ -159,6 +170,8 @@ pub enum Provider {
     OpenAI,
     /// Google
     Google,
+    /// Amazon
+    Amazon,
 }
 
 impl Provider {
@@ -168,6 +181,7 @@ impl Provider {
             Provider::Anthropic => "anthropic",
             Provider::OpenAI => "openai",
             Provider::Google => "google",
+            Provider::Amazon => "amazon",
         }
     }
 
@@ -177,6 +191,7 @@ impl Provider {
             Provider::Anthropic => "Anthropic",
             Provider::OpenAI => "OpenAI",
             Provider::Google => "Google",
+            Provider::Amazon => "Amazon",
         }
     }
 }
@@ -421,6 +436,7 @@ fn detect_agent_installation_uncached(agent: AgentKind) -> (bool, Option<Package
         AgentKind::ClaudeCode => "claude",
         AgentKind::Codex => "codex",
         AgentKind::Gemini => "gemini",
+        AgentKind::Kiro => "kiro-cli",
     };
 
     // Check if the binary exists in PATH (fast check)
@@ -715,6 +731,11 @@ pub fn get_agent_config(agent_name: &str) -> Result<AcpAgentConfig> {
                     agent.acp_package().to_string(),
                     "--experimental-acp".to_string(),
                 ],
+            ),
+            // Kiro uses native ACP via 'acp' subcommand
+            AgentKind::Kiro => (
+                "kiro-cli".to_string(),
+                vec!["acp".to_string()],
             ),
         };
 
