@@ -654,6 +654,37 @@ impl App {
                         .add_info_message(format!("Failed to switch model: {error_msg}"), None);
                 }
             }
+            #[cfg(feature = "unstable")]
+            AppEvent::OpenAcpModePicker {
+                modes,
+                current_mode_id,
+            } => {
+                self.chat_widget
+                    .open_acp_mode_picker(modes, current_mode_id);
+            }
+            #[cfg(feature = "unstable")]
+            AppEvent::SetAcpMode {
+                mode_id,
+                display_name,
+            } => {
+                self.chat_widget.set_acp_mode(mode_id, display_name);
+            }
+            #[cfg(feature = "unstable")]
+            AppEvent::AcpModeSetResult {
+                success,
+                display_name,
+                error,
+                ..
+            } => {
+                if success {
+                    self.chat_widget
+                        .add_info_message(format!("Mode switched to: {display_name}"), None);
+                } else {
+                    let error_msg = error.unwrap_or_else(|| "Unknown error".to_string());
+                    self.chat_widget
+                        .add_info_message(format!("Failed to switch mode: {error_msg}"), None);
+                }
+            }
             AppEvent::LoginComplete { success } => {
                 self.chat_widget.handle_login_complete(success);
             }

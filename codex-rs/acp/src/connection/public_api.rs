@@ -31,6 +31,9 @@ impl AcpConnection {
         let model_state = Arc::new(RwLock::new(AcpModelState::new()));
         let model_state_for_worker = Arc::clone(&model_state);
 
+        let mode_state = Arc::new(RwLock::new(AcpModeState::new()));
+        let mode_state_for_worker = Arc::clone(&mode_state);
+
         // Create synchronous channel for shutdown completion notification.
         // This allows Drop to wait for worker thread cleanup to complete.
         let (shutdown_complete_tx, shutdown_complete_rx) = std::sync::mpsc::channel();
@@ -64,6 +67,7 @@ impl AcpConnection {
                                     inner,
                                     command_rx,
                                     model_state_for_worker,
+                                    mode_state_for_worker,
                                     shutdown_complete_tx,
                                 )
                                 .await;
@@ -90,6 +94,7 @@ impl AcpConnection {
             approval_rx,
             persistent_rx,
             model_state,
+            mode_state,
             worker_thread: Mutex::new(Some(worker_thread)),
             shutdown_complete_rx: Mutex::new(Some(shutdown_complete_rx)),
         })
@@ -240,6 +245,37 @@ impl AcpConnection {
             .send(AcpCommand::SetModel {
                 session_id: session_id.clone(),
                 model_id: model_id.clone(),
+                response_tx,
+            })
+            .await
+            .context("ACP worker thread died")?;
+        response_rx.await.context("ACP worker thread died")?
+    }
+
+    /// Get the current mode state.
+    pub fn mode_state(&self) -> AcpModeState {
+        #[expect(
+            clippy::expect_used,
+            reason = "RwLock poisoning indicates a bug elsewhere"
+        )]
+        self.mode_state
+            .read()
+            .expect("Mode state lock poisoned")
+            .clone()
+    }
+
+    /// Switch to a different mode for the given session.
+    #[cfg(feature = "unstable")]
+    pub async fn set_mode(
+        &self,
+        session_id: &acp::SessionId,
+        mode_id: &acp::SessionModeId,
+    ) -> Result<()> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.command_tx
+            .send(AcpCommand::SetMode {
+                session_id: session_id.clone(),
+                mode_id: mode_id.clone(),
                 response_tx,
             })
             .await

@@ -114,6 +114,34 @@ impl AcpModelState {
     }
 }
 
+/// Mode state captured from the ACP session.
+///
+/// This is populated when a session is created (from `NewSessionResponse`)
+/// and can be updated when the mode is changed.
+#[derive(Debug, Clone, Default)]
+pub struct AcpModeState {
+    /// The ID of the currently active mode
+    pub current_mode_id: Option<acp::SessionModeId>,
+    /// List of available modes from the agent
+    pub available_modes: Vec<acp::SessionMode>,
+}
+
+impl AcpModeState {
+    /// Create a new empty mode state
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Update from an ACP SessionModeState
+    #[cfg(feature = "unstable")]
+    pub fn from_session_mode_state(state: &acp::SessionModeState) -> Self {
+        Self {
+            current_mode_id: Some(state.current_mode_id.clone()),
+            available_modes: state.available_modes.clone(),
+        }
+    }
+}
+
 /// Commands sent from the main thread to the ACP worker thread.
 enum AcpCommand {
     CreateSession {
@@ -140,6 +168,12 @@ enum AcpCommand {
     SetModel {
         session_id: acp::SessionId,
         model_id: acp::ModelId,
+        response_tx: oneshot::Sender<Result<()>>,
+    },
+    #[cfg(feature = "unstable")]
+    SetMode {
+        session_id: acp::SessionId,
+        mode_id: acp::SessionModeId,
         response_tx: oneshot::Sender<Result<()>>,
     },
 }
@@ -170,6 +204,8 @@ pub struct AcpConnection {
     /// Thread-safe model state shared between the main thread and worker thread.
     /// Updated when sessions are created or models are switched.
     model_state: Arc<RwLock<AcpModelState>>,
+    /// Thread-safe mode state shared between the main thread and worker thread.
+    mode_state: Arc<RwLock<AcpModeState>>,
     /// Worker thread handle. Stored as Option inside Mutex to allow taking in Drop.
     worker_thread: Mutex<Option<thread::JoinHandle<()>>>,
     /// Synchronous channel to receive notification when worker thread cleanup is complete.

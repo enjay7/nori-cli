@@ -40,6 +40,7 @@ pub use backend::AcpBackend;
 pub use backend::AcpBackendConfig;
 pub use connection::AcpConnection;
 pub use connection::AcpModelState;
+pub use connection::AcpModeState;
 pub use connection::ApprovalRequest;
 pub use registry::AcpAgentConfig;
 pub use registry::AcpAgentInfo;
@@ -100,3 +101,15 @@ pub use agent_client_protocol::SessionModelState;
 pub use agent_client_protocol::SetSessionModelRequest;
 #[cfg(feature = "unstable")]
 pub use agent_client_protocol::SetSessionModelResponse;
+
+// Re-export mode-related types (unstable feature)
+#[cfg(feature = "unstable")]
+pub use agent_client_protocol::SessionModeState;
+#[cfg(feature = "unstable")]
+pub use agent_client_protocol::SessionMode;
+#[cfg(feature = "unstable")]
+pub use agent_client_protocol::SessionModeId;
+#[cfg(feature = "unstable")]
+pub use agent_client_protocol::SetSessionModeRequest;
+#[cfg(feature = "unstable")]
+pub use agent_client_protocol::SetSessionModeResponse;

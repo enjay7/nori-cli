@@ -513,4 +513,83 @@ impl ChatWidget {
             );
         }
     }
+
+    /// Open the mode picker popup.
+    pub(crate) fn open_mode_popup(&mut self) {
+        #[cfg(feature = "unstable")]
+        {
+            if let Some(handle) = self.acp_handle.clone() {
+                let app_event_tx = self.app_event_tx.clone();
+                tokio::spawn(async move {
+                    if let Some(mode_state) = handle.get_mode_state().await {
+                        let modes: Vec<crate::app_event::AcpModeInfo> = mode_state
+                            .available_modes
+                            .iter()
+                            .map(|m| crate::app_event::AcpModeInfo {
+                                mode_id: m.id.to_string(),
+                                display_name: m.name.clone(),
+                                description: m.description.clone(),
+                            })
+                            .collect();
+                        let current_mode_id =
+                            mode_state.current_mode_id.map(|id| id.to_string());
+                        app_event_tx.send(AppEvent::OpenAcpModePicker {
+                            modes,
+                            current_mode_id,
+                        });
+                    } else {
+                        app_event_tx.send(AppEvent::OpenAcpModePicker {
+                            modes: vec![],
+                            current_mode_id: None,
+                        });
+                    }
+                });
+                return;
+            }
+        }
+    }
+
+    /// Open the ACP mode picker with fetched modes.
+    #[cfg(feature = "unstable")]
+    pub(crate) fn open_acp_mode_picker(
+        &mut self,
+        modes: Vec<crate::app_event::AcpModeInfo>,
+        current_mode_id: Option<String>,
+    ) {
+        let params = crate::nori::agent_picker::acp_mode_picker_params_with_modes(
+            &modes,
+            current_mode_id.as_deref(),
+        );
+        self.bottom_pane.show_selection_view(params);
+    }
+
+    /// Set the ACP mode via the agent handle.
+    #[cfg(feature = "unstable")]
+    pub(crate) fn set_acp_mode(&mut self, mode_id: String, display_name: String) {
+        if let Some(handle) = self.acp_handle.clone() {
+            let app_event_tx = self.app_event_tx.clone();
+            let mode_id_for_result = mode_id.clone();
+            let display_name_for_result = display_name.clone();
+            tokio::spawn(async move {
+                match handle.set_mode(mode_id).await {
+                    Ok(()) => {
+                        app_event_tx.send(AppEvent::AcpModeSetResult {
+                            success: true,
+                            mode_id: mode_id_for_result,
+                            display_name: display_name_for_result,
+                            error: None,
+                        });
+                    }
+                    Err(e) => {
+                        app_event_tx.send(AppEvent::AcpModeSetResult {
+                            success: false,
+                            mode_id: mode_id_for_result,
+                            display_name: display_name_for_result,
+                            error: Some(e.to_string()),
+                        });
+                    }
+                }
+            });
+        }
+    }
 }

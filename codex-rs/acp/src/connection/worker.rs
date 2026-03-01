@@ -154,6 +154,7 @@ pub(super) async fn run_command_loop(
     mut inner: AcpConnectionInner,
     mut command_rx: mpsc::Receiver<AcpCommand>,
     model_state: Arc<RwLock<AcpModelState>>,
+    mode_state: Arc<RwLock<AcpModeState>>,
     shutdown_complete_tx: std::sync::mpsc::Sender<()>,
 ) {
     use acp::Agent;
@@ -185,6 +186,20 @@ pub(super) async fn run_command_loop(
                         "Model state updated: current={:?}, available={}",
                         state.current_model_id,
                         state.available_models.len()
+                    );
+                }
+
+                // Capture mode state from the response if available
+                #[cfg(feature = "unstable")]
+                if let Ok(ref response) = result
+                    && let Some(ref modes) = response.modes
+                    && let Ok(mut state) = mode_state.write()
+                {
+                    *state = AcpModeState::from_session_mode_state(modes);
+                    debug!(
+                        "Mode state updated: current={:?}, available={}",
+                        state.current_mode_id,
+                        state.available_modes.len()
                     );
                 }
 
@@ -335,6 +350,33 @@ pub(super) async fn run_command_loop(
                 }
 
                 let result = result.map(|_| ()).context("Failed to set ACP model");
+                let _ = response_tx.send(result);
+            }
+            #[cfg(feature = "unstable")]
+            AcpCommand::SetMode {
+                session_id,
+                mode_id,
+                response_tx,
+            } => {
+                let result = inner
+                    .connection
+                    .set_session_mode(acp::SetSessionModeRequest::new(
+                        session_id,
+                        mode_id.clone(),
+                    ))
+                    .await;
+
+                if result.is_ok()
+                    && let Ok(mut state) = mode_state.write()
+                {
+                    state.current_mode_id = Some(mode_id);
+                    debug!(
+                        "Mode state updated after switch: current={:?}",
+                        state.current_mode_id
+                    );
+                }
+
+                let result = result.map(|_| ()).context("Failed to set ACP mode");
                 let _ = response_tx.send(result);
             }
         }

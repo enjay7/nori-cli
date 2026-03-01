@@ -39,6 +39,7 @@ use tracing::warn;
 
 use crate::connection::AcpConnection;
 use crate::connection::AcpModelState;
+use crate::connection::AcpModeState;
 use crate::connection::ApprovalEventType;
 use crate::connection::ApprovalRequest;
 use crate::registry::get_agent_config;

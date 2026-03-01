@@ -132,6 +132,9 @@ impl ChatWidget {
             SlashCommand::Model => {
                 self.open_model_popup();
             }
+            SlashCommand::Mode => {
+                self.open_mode_popup();
+            }
             SlashCommand::Approvals => {
                 self.open_approvals_popup();
             }

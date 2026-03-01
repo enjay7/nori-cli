@@ -26,6 +26,18 @@ pub(crate) struct AcpModelInfo {
     pub description: Option<String>,
 }
 
+/// Information about an available ACP mode.
+#[cfg(feature = "unstable")]
+#[derive(Debug, Clone)]
+pub(crate) struct AcpModeInfo {
+    /// The mode ID (used for switching)
+    pub mode_id: String,
+    /// Human-readable display name
+    pub display_name: String,
+    /// Optional description
+    pub description: Option<String>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
@@ -227,6 +239,39 @@ pub(crate) enum AppEvent {
         /// The model that was set (on success) or attempted (on failure).
         /// Used for persisting the model selection to config.toml.
         model_id: String,
+        /// The display name for UI feedback
+        display_name: String,
+        /// Error message on failure
+        error: Option<String>,
+    },
+
+    /// Open the ACP mode picker popup with available modes from the agent.
+    #[cfg(feature = "unstable")]
+    OpenAcpModePicker {
+        /// Available modes from the ACP agent
+        modes: Vec<AcpModeInfo>,
+        /// Currently selected mode ID
+        current_mode_id: Option<String>,
+    },
+
+    /// Set the active mode in the ACP agent.
+    #[cfg(feature = "unstable")]
+    SetAcpMode {
+        /// The mode ID to switch to
+        mode_id: String,
+        /// The display name for UI feedback
+        display_name: String,
+    },
+
+    /// Result of setting the ACP mode.
+    #[cfg(feature = "unstable")]
+    AcpModeSetResult {
+        /// Whether the mode was set successfully
+        success: bool,
+        /// The mode that was set (on success) or attempted (on failure).
+        /// Reserved for future use (e.g., persisting mode selection to config).
+        #[allow(dead_code)]
+        mode_id: String,
         /// The display name for UI feedback
         display_name: String,
         /// Error message on failure

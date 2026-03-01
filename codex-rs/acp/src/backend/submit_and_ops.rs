@@ -489,4 +489,16 @@ impl AcpBackend {
         let session_id = self.session_id.read().await;
         self.connection.set_model(&session_id, model_id).await
     }
+
+    /// Returns information about the current mode and available modes.
+    pub fn mode_state(&self) -> AcpModeState {
+        self.connection.mode_state()
+    }
+
+    /// Switch to a different mode for the current session.
+    #[cfg(feature = "unstable")]
+    pub async fn set_mode(&self, mode_id: &acp::SessionModeId) -> Result<()> {
+        let session_id = self.session_id.read().await;
+        self.connection.set_mode(&session_id, mode_id).await
+    }
 }

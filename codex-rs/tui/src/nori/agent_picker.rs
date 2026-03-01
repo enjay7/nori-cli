@@ -176,6 +176,74 @@ pub fn acp_model_picker_params_with_models(
     }
 }
 
+/// Create selection view parameters for the ACP mode picker with actual modes.
+#[cfg(feature = "unstable")]
+pub fn acp_mode_picker_params_with_modes(
+    modes: &[crate::app_event::AcpModeInfo],
+    current_mode_id: Option<&str>,
+) -> SelectionViewParams {
+    if modes.is_empty() {
+        let items: Vec<SelectionItem> = vec![SelectionItem {
+            name: "Mode switching not available".to_string(),
+            description: Some("The ACP agent did not provide any modes".to_string()),
+            is_current: false,
+            actions: vec![],
+            dismiss_on_select: true,
+            ..Default::default()
+        }];
+
+        return SelectionViewParams {
+            title: Some("Select Mode".to_string()),
+            subtitle: Some("Mode switching not supported by this agent".to_string()),
+            footer_hint: Some(Line::from("Press esc to dismiss.")),
+            items,
+            ..Default::default()
+        };
+    }
+
+    let items: Vec<SelectionItem> = modes
+        .iter()
+        .map(|mode| {
+            let is_current = current_mode_id
+                .map(|id| id == mode.mode_id)
+                .unwrap_or(false);
+            let mode_id = mode.mode_id.clone();
+            let display_name = mode.display_name.clone();
+
+            let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+                tx.send(AppEvent::SetAcpMode {
+                    mode_id: mode_id.clone(),
+                    display_name: display_name.clone(),
+                });
+            })];
+
+            SelectionItem {
+                name: mode.display_name.clone(),
+                description: mode.description.clone(),
+                is_current,
+                actions,
+                dismiss_on_select: true,
+                search_value: Some(format!(
+                    "{} {}",
+                    mode.display_name,
+                    mode.description.as_deref().unwrap_or("")
+                )),
+                ..Default::default()
+            }
+        })
+        .collect();
+
+    SelectionViewParams {
+        title: Some("Select Mode".to_string()),
+        subtitle: Some("Select a mode for this ACP agent".to_string()),
+        footer_hint: Some(standard_popup_hint_line()),
+        items,
+        is_searchable: true,
+        search_placeholder: Some("Type to filter modes...".to_string()),
+        ..Default::default()
+    }
+}
+
 /// Get information about an agent by agent name
 #[allow(dead_code)]
 pub fn get_agent_info(agent_name: &str) -> Option<AcpAgentInfo> {
