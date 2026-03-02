@@ -3,8 +3,7 @@
 //! This crate tracks CLI lifecycle events (first install, version updates, sessions)
 //! by maintaining a state file at `$NORI_HOME/.nori-install.json`.
 //!
-//! The tracker runs non-blocking on every CLI launch and can emit analytics events
-//! to help understand CLI usage patterns.
+//! The tracker runs non-blocking on every CLI launch.
 //!
 //! # Usage
 //!
@@ -18,16 +17,9 @@
 //! track_launch(Path::new("/home/user/.nori/cli"));
 //! ```
 
-mod analytics;
 mod detection;
 mod state;
 
-pub use analytics::ANALYTICS_OPT_OUT_ENV;
-pub use analytics::AnalyticsEventType;
-pub use analytics::TrackEventRequest;
-pub use analytics::create_event;
-pub use analytics::is_ci_env;
-pub use analytics::send_event;
 pub use detection::detect_install_source;
 pub use detection::generate_client_id;
 pub use state::InstallSource;
@@ -84,7 +76,6 @@ async fn track_launch_inner(nori_home: &Path) -> anyhow::Result<Vec<LaunchEvent>
     let current_version = CLI_VERSION;
     let install_source = detect_install_source();
     let client_id = generate_client_id();
-    let session_id = now.timestamp().to_string();
 
     // Read existing state or treat missing/corrupt file as first install
     let existing_state = read_install_state(nori_home);
@@ -141,34 +132,6 @@ async fn track_launch_inner(nori_home: &Path) -> anyhow::Result<Vec<LaunchEvent>
     // Write updated state
     write_install_state(nori_home, &new_state).await?;
 
-    // Send analytics events (fire-and-forget)
-    if !should_skip_analytics(&new_state) {
-        let days_since_install = new_state.days_since_install(now);
-        for event in &events {
-            let (event_type, is_first_install, previous_version) = match event {
-                LaunchEvent::AppInstall => (AnalyticsEventType::InstallDetected, true, None),
-                LaunchEvent::AppUpdate { previous_version } => (
-                    AnalyticsEventType::InstallDetected,
-                    false,
-                    Some(previous_version.clone()),
-                ),
-                LaunchEvent::SessionStart => (AnalyticsEventType::SessionStart, false, None),
-                LaunchEvent::UserResurrected => (AnalyticsEventType::UserResurrected, false, None),
-            };
-
-            let analytics_event = create_event(
-                event_type,
-                &new_state,
-                &session_id,
-                now,
-                days_since_install,
-                is_first_install,
-                previous_version,
-            );
-            send_event(&analytics_event).await;
-        }
-    }
-
     debug!("Install tracking complete: {events:?}");
 
     Ok(events)
@@ -185,10 +148,6 @@ pub fn track_launch_sync(nori_home: &Path) -> anyhow::Result<LaunchEvent> {
         .build()?;
     let events = rt.block_on(track_launch_inner(nori_home))?;
     Ok(events.last().cloned().unwrap_or(LaunchEvent::SessionStart))
-}
-
-fn should_skip_analytics(state: &InstallState) -> bool {
-    std::env::var(ANALYTICS_OPT_OUT_ENV).as_deref() == Ok("1") || state.opt_out || is_ci_env()
 }
 
 fn is_valid_uuid(value: &str) -> bool {
