@@ -2,9 +2,6 @@
 source: tui-pty-e2e/tests/acp_tool_calls.rs
 expression: normalize_for_input_snapshot(contents)
 ---
-› Analyze code
-
-
 • Analyzing the code.
 
 • Ran 'Running tests(cargo test)'
@@ -16,7 +13,6 @@ expression: normalize_for_input_snapshot(contents)
 ────────────────────────────────────────────────────────────────────────────────
 
 • Here is the final analysis result.
-
 
 › [DEFAULT_PROMPT]
 
