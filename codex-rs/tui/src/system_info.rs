@@ -60,6 +60,7 @@ impl SystemInfo {
     /// * `agent_kind` - Optional agent kind to use for transcript discovery.
     ///   If provided, searches for transcripts from that specific agent.
     ///   If None, attempts to detect the agent from environment variables.
+    #[allow(dead_code)]
     pub(crate) fn collect_fresh(agent_kind: Option<AgentKind>) -> Self {
         Self::collect_impl(None, agent_kind, None)
     }

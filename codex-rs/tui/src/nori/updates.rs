@@ -4,6 +4,7 @@
 
 #![cfg(not(debug_assertions))]
 
+#[allow(unused_imports)]
 use crate::nori::update_action::UpdateAction;
 use chrono::DateTime;
 use chrono::Duration;
