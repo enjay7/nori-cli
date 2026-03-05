@@ -1,5 +1,5 @@
 ---
-name: Registering Custom ACP Agents
+name: registering-custom-acp-agent
 description: Use when the user wants to register a custom ACP agent in Nori, or try one of the example agents (elizacp, kimi-cli, opencode)
 ---
 
