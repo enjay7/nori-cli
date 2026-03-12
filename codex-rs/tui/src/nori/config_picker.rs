@@ -11,6 +11,7 @@ use codex_acp::config::NotifyAfterIdle;
 use codex_acp::config::OsNotifications;
 use codex_acp::config::ScriptTimeout;
 use codex_acp::config::TerminalNotifications;
+use codex_acp::config::VimEnterBehavior;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
@@ -71,18 +72,26 @@ pub fn config_picker_params(
                 }
             },
         ),
-        build_toggle_item(
-            "Vim Mode",
-            "Enable vim-style navigation in the textarea (Escape enters normal mode)",
-            config.vim_mode,
-            {
-                let tx = app_event_tx.clone();
-                let new_value = !config.vim_mode;
-                move || {
-                    tx.send(AppEvent::SetConfigVimMode(new_value));
+        {
+            let current_mode = config.vim_mode;
+            let display_name = format!("Vim Mode ({})", current_mode.display_name().to_lowercase());
+            let actions: Vec<SelectionAction> = vec![Box::new({
+                move |tx| {
+                    tx.send(AppEvent::OpenVimModePicker);
                 }
-            },
-        ),
+            })];
+            SelectionItem {
+                name: display_name,
+                description: Some(
+                    "Enable vim-style navigation in the textarea (Escape enters normal mode)"
+                        .to_string(),
+                ),
+                is_current: current_mode.is_enabled(),
+                actions,
+                dismiss_on_select: true,
+                ..Default::default()
+            }
+        },
         {
             let current_mode = config.auto_worktree;
             let display_name = format!(
@@ -221,6 +230,26 @@ pub fn config_picker_params(
                 ..Default::default()
             }
         },
+        {
+            let current_fm = config.file_manager;
+            let display_name = match current_fm {
+                Some(fm) => format!("File Manager ({})", fm.display_name()),
+                None => "File Manager (not set)".to_string(),
+            };
+            let actions: Vec<SelectionAction> = vec![Box::new({
+                move |tx| {
+                    tx.send(AppEvent::OpenFileManagerPicker);
+                }
+            })];
+            SelectionItem {
+                name: display_name,
+                description: Some("Terminal file manager for the /browse command".to_string()),
+                is_current: false,
+                actions,
+                dismiss_on_select: true,
+                ..Default::default()
+            }
+        },
     ];
 
     SelectionViewParams {
@@ -305,6 +334,53 @@ where
         is_current: is_enabled,
         actions,
         dismiss_on_select: true,
+        ..Default::default()
+    }
+}
+
+/// Create selection view parameters for the vim mode sub-picker.
+///
+/// # Arguments
+/// * `current` - The currently selected VimEnterBehavior variant
+/// * `_app_event_tx` - The app event sender for triggering config change events
+pub fn vim_mode_picker_params(
+    current: VimEnterBehavior,
+    _app_event_tx: AppEventSender,
+) -> SelectionViewParams {
+    let items: Vec<SelectionItem> = VimEnterBehavior::all_variants()
+        .iter()
+        .map(|&variant| {
+            let is_current = variant == current;
+            let description = match variant {
+                VimEnterBehavior::Newline => Some(
+                    "Enter inserts a newline in INSERT mode, submits in NORMAL mode".to_string(),
+                ),
+                VimEnterBehavior::Submit => Some(
+                    "Enter submits in INSERT mode, inserts a newline in NORMAL mode".to_string(),
+                ),
+                VimEnterBehavior::Off => Some("Disable vim mode".to_string()),
+            };
+            let actions: Vec<SelectionAction> = vec![Box::new({
+                move |tx| {
+                    tx.send(AppEvent::SetConfigVimMode(variant));
+                }
+            })];
+            SelectionItem {
+                name: variant.display_name().to_string(),
+                description,
+                is_current,
+                actions,
+                dismiss_on_select: true,
+                ..Default::default()
+            }
+        })
+        .collect();
+
+    SelectionViewParams {
+        title: Some("Vim Mode".to_string()),
+        subtitle: Some("Choose Enter key behavior for vim mode".to_string()),
+        footer_hint: Some(standard_popup_hint_line()),
+        items,
         ..Default::default()
     }
 }
@@ -478,6 +554,51 @@ pub fn footer_segments_picker_params(
     }
 }
 
+/// Create selection view parameters for the file manager sub-picker.
+///
+/// # Arguments
+/// * `current` - The currently selected file manager, if any
+/// * `_app_event_tx` - The app event sender for triggering config change events
+pub fn file_manager_picker_params(
+    current: Option<codex_acp::config::FileManager>,
+    _app_event_tx: AppEventSender,
+) -> SelectionViewParams {
+    use codex_acp::config::FileManager;
+
+    let variants = [
+        FileManager::Vifm,
+        FileManager::Ranger,
+        FileManager::Lf,
+        FileManager::Nnn,
+    ];
+    let items: Vec<SelectionItem> = variants
+        .iter()
+        .map(|&variant| {
+            let is_current = current == Some(variant);
+            let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+                tx.send(AppEvent::SetConfigFileManager(variant));
+            })];
+            SelectionItem {
+                name: variant.display_name().to_string(),
+                description: None,
+                is_current,
+                actions,
+                dismiss_on_select: true,
+                ..Default::default()
+            }
+        })
+        .collect();
+
+    SelectionViewParams {
+        title: Some("File Manager".to_string()),
+        subtitle: Some("Choose a terminal file manager for /browse".to_string()),
+        footer_hint: Some(standard_popup_hint_line()),
+        items,
+        initial_selected_idx: Some(0),
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,7 +620,7 @@ mod tests {
             os_notifications: OsNotifications::Enabled,
             vertical_footer,
             notify_after_idle: codex_acp::config::NotifyAfterIdle::FiveSeconds,
-            vim_mode: false,
+            vim_mode: VimEnterBehavior::Off,
             hotkeys: codex_acp::config::HotkeyConfig::default(),
             script_timeout: codex_acp::config::ScriptTimeout::default(),
             loop_count: None,
@@ -527,6 +648,7 @@ mod tests {
             default_models: std::collections::HashMap::new(),
             agents: vec![],
             skillset_per_session: false,
+            file_manager: None,
         }
     }
 
@@ -538,7 +660,7 @@ mod tests {
 
         let params = config_picker_params(&config, tx);
 
-        assert_eq!(params.items.len(), 11);
+        assert_eq!(params.items.len(), 12);
         assert!(params.title.is_some());
         assert!(params.title.unwrap().contains("Configuration"));
     }
@@ -573,7 +695,7 @@ mod tests {
 
         let params = config_picker_params(&config, tx);
 
-        assert_eq!(params.items.len(), 11);
+        assert_eq!(params.items.len(), 12);
         // The 4th item should be Vim Mode
         assert!(params.items[3].name.contains("Vim Mode"));
         // The 5th item should be Auto Worktree
@@ -745,7 +867,7 @@ mod tests {
         let params = config_picker_params(&config, tx);
 
         // Should now have 11 items (includes vim mode, auto worktree, per session skillsets, script timeout, and loop count)
-        assert_eq!(params.items.len(), 11);
+        assert_eq!(params.items.len(), 12);
         // Find the vim mode item
         let vim_mode_item = params
             .items
@@ -762,7 +884,7 @@ mod tests {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
         let mut config = make_test_config(false);
-        config.vim_mode = true;
+        config.vim_mode = VimEnterBehavior::Submit;
 
         let params = config_picker_params(&config, tx);
 
@@ -772,17 +894,17 @@ mod tests {
             .find(|item| item.name.contains("Vim Mode"))
             .expect("should have vim mode item");
         assert!(
-            vim_mode_item.name.contains("(on)"),
-            "vim mode should show (on) when enabled"
+            vim_mode_item.name.contains("enter is submit"),
+            "vim mode should show current behavior when enabled, got: {}",
+            vim_mode_item.name
         );
     }
 
     #[test]
-    fn config_picker_vim_mode_action_sends_correct_event() {
+    fn config_picker_vim_mode_action_opens_picker() {
         let (tx_raw, mut rx) = unbounded_channel::<AppEvent>();
         let tx = AppEventSender::new(tx_raw);
-        let mut config = make_test_config(false);
-        config.vim_mode = false;
+        let config = make_test_config(false);
 
         let params = config_picker_params(&config, tx.clone());
 
@@ -798,13 +920,10 @@ mod tests {
         }
 
         let event = rx.try_recv().expect("should receive event");
-        match event {
-            AppEvent::SetConfigVimMode(value) => {
-                // Was false, should toggle to true
-                assert!(value, "vim_mode was off, should toggle to on");
-            }
-            _ => panic!("expected SetConfigVimMode event, got: {event:?}"),
-        }
+        assert!(
+            matches!(event, AppEvent::OpenVimModePicker),
+            "vim mode action should open picker, got: {event:?}"
+        );
     }
 
     #[test]
@@ -1188,6 +1307,64 @@ mod tests {
             assert!(
                 !desc.contains("requires Auto Worktree"),
                 "description should not say 'requires Auto Worktree', got: {desc}"
+            );
+        }
+    }
+
+    #[test]
+    fn file_manager_picker_lists_all_variants_and_sends_correct_events() {
+        let (tx_raw, mut rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+
+        let params =
+            file_manager_picker_params(Some(codex_acp::config::FileManager::Vifm), tx.clone());
+
+        // Should have 4 items: vifm, ranger, lf, nnn
+        assert_eq!(params.items.len(), 4, "should have 4 file manager options");
+
+        // Vifm should be marked as current
+        let vifm_item = params
+            .items
+            .iter()
+            .find(|item| item.name.contains("vifm"))
+            .expect("should have vifm item");
+        assert!(vifm_item.is_current, "vifm should be marked as current");
+
+        // Select "ranger" - should send correct event
+        let ranger_item = params
+            .items
+            .iter()
+            .find(|item| item.name.contains("ranger"))
+            .expect("should have ranger item");
+        assert!(
+            !ranger_item.is_current,
+            "ranger should not be marked as current"
+        );
+        for action in &ranger_item.actions {
+            action(&tx);
+        }
+        let event = rx.try_recv().expect("should receive event");
+        assert!(
+            matches!(
+                event,
+                AppEvent::SetConfigFileManager(codex_acp::config::FileManager::Ranger)
+            ),
+            "expected SetConfigFileManager(Ranger), got: {event:?}"
+        );
+    }
+
+    #[test]
+    fn file_manager_picker_none_current_marks_nothing() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+
+        let params = file_manager_picker_params(None, tx);
+
+        for item in &params.items {
+            assert!(
+                !item.is_current,
+                "no item should be marked as current when file_manager is None, but '{}' was",
+                item.name
             );
         }
     }

@@ -4,7 +4,6 @@ expression: normalize_for_input_snapshot(contents)
 ---
 › Explore files
 
-
 • Test message 1Test message 2
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -17,7 +16,6 @@ expression: normalize_for_input_snapshot(contents)
 ────────────────────────────────────────────────────────────────────────────────
 
 • Multi-call exploring done.
-
 
 › [DEFAULT_PROMPT]
 

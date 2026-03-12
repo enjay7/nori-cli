@@ -313,8 +313,12 @@ pub(crate) enum AppEvent {
     /// Set the TUI OS notifications config setting.
     SetConfigOsNotifications(bool),
 
+    /// Open the vim mode sub-picker.
+    #[cfg(feature = "nori-config")]
+    OpenVimModePicker,
+
     /// Set the TUI vim mode config setting.
-    SetConfigVimMode(bool),
+    SetConfigVimMode(codex_acp::config::VimEnterBehavior),
 
     /// Open the notify-after-idle sub-picker.
     #[cfg(feature = "nori-config")]
@@ -484,5 +488,28 @@ pub(crate) enum AppEvent {
         project_id: String,
         /// Session identifier to resume
         session_id: String,
+    },
+
+    /// Launch a terminal file manager to browse and optionally edit files.
+    #[cfg(feature = "nori-config")]
+    BrowseFiles(codex_acp::config::FileManager),
+
+    /// Set the configured file manager for the `/browse` command.
+    #[cfg(feature = "nori-config")]
+    SetConfigFileManager(codex_acp::config::FileManager),
+
+    /// Open the file manager sub-picker.
+    #[cfg(feature = "nori-config")]
+    OpenFileManagerPicker,
+
+    /// Open the fork picker modal showing previous user messages.
+    OpenForkPicker,
+
+    /// Fork the conversation to just before the selected user message.
+    ForkToMessage {
+        /// Index of the target user message cell in `transcript_cells`.
+        cell_index: usize,
+        /// The text of the selected message, to prefill the composer.
+        prefill: String,
     },
 }

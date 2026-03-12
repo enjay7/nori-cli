@@ -109,9 +109,12 @@ impl App {
             .add_info_message(format!("Loop count set to {display} (this session)."), None);
     }
 
-    pub(super) async fn persist_vim_mode_setting(&mut self, enabled: bool) {
+    pub(super) async fn persist_vim_mode_setting(
+        &mut self,
+        value: codex_acp::config::VimEnterBehavior,
+    ) {
         if let Err(err) = ConfigEditsBuilder::new(&self.config.codex_home)
-            .set_path(&["tui", "vim_mode"], toml_value(enabled))
+            .set_path(&["tui", "vim_mode"], toml_value(value.toml_value()))
             .apply()
             .await
         {
@@ -125,12 +128,12 @@ impl App {
         }
 
         // Update in-memory state and propagate to the chat widget
-        self.vim_mode_enabled = enabled;
-        self.chat_widget.set_vim_mode_enabled(enabled);
+        self.vim_mode = value;
+        self.chat_widget.set_vim_mode(value);
 
-        let status = if enabled { "enabled" } else { "disabled" };
+        let display = value.display_name();
         self.chat_widget
-            .add_info_message(format!("Vim mode {status}."), None);
+            .add_info_message(format!("Vim mode: {display}."), None);
     }
 
     #[cfg(feature = "nori-config")]
@@ -216,6 +219,28 @@ impl App {
         let nori_config = codex_acp::config::NoriConfig::load().unwrap_or_default();
         self.chat_widget
             .replace_footer_segments_picker(&nori_config.footer_segment_config);
+    }
+
+    #[cfg(feature = "nori-config")]
+    pub(super) async fn persist_file_manager_setting(
+        &mut self,
+        value: codex_acp::config::FileManager,
+    ) {
+        if let Err(err) = ConfigEditsBuilder::new(&self.config.codex_home)
+            .set_path(&["tui", "file_manager"], toml_value(value.command_name()))
+            .apply()
+            .await
+        {
+            tracing::error!(error = %err, "failed to persist file_manager setting");
+            self.chat_widget
+                .add_error_message(format!("Failed to save file_manager setting: {err}"));
+            return;
+        }
+
+        self.chat_widget.add_info_message(
+            format!("File manager set to {}.", value.display_name()),
+            None,
+        );
     }
 
     pub(super) async fn persist_notification_setting(&mut self, setting_name: &str, enabled: bool) {

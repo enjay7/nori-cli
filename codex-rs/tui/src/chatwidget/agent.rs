@@ -166,12 +166,13 @@ pub(crate) fn spawn_agent(
     config: Config,
     app_event_tx: AppEventSender,
     server: Arc<ConversationManager>,
+    fork_context: Option<String>,
 ) -> SpawnAgentResult {
     let acp_agent_result = get_agent_config(&config.model);
 
     match (acp_agent_result.is_ok(), config.acp_allow_http_fallback) {
         // Agent is registered in ACP registry -> use ACP
-        (true, _) => spawn_acp_agent(config, app_event_tx),
+        (true, _) => spawn_acp_agent(config, app_event_tx, fork_context),
 
         // Agent NOT registered, but HTTP fallback is allowed -> use HTTP
         (false, true) => {
@@ -232,7 +233,11 @@ fn spawn_error_agent(
 ///
 /// This uses the `codex_acp` crate to spawn an agent subprocess and handle
 /// communication via the Agent Client Protocol.
-fn spawn_acp_agent(config: Config, app_event_tx: AppEventSender) -> SpawnAgentResult {
+fn spawn_acp_agent(
+    config: Config,
+    app_event_tx: AppEventSender,
+    fork_context: Option<String>,
+) -> SpawnAgentResult {
     let (codex_op_tx, mut codex_op_rx) = unbounded_channel::<Op>();
 
     // Create the model command channel for model switching operations
@@ -306,6 +311,7 @@ fn spawn_acp_agent(config: Config, app_event_tx: AppEventSender) -> SpawnAgentRe
             async_post_agent_response_hooks: nori_config.async_post_agent_response_hooks.clone(),
             script_timeout: nori_config.script_timeout.as_duration(),
             default_model: nori_config.default_models.get(&config.model).cloned(),
+            initial_context: fork_context,
         };
 
         // Race backend init against shutdown requests and a timeout.
@@ -483,6 +489,7 @@ pub(crate) fn spawn_acp_agent_resume(
             async_post_agent_response_hooks: nori_config.async_post_agent_response_hooks.clone(),
             script_timeout: nori_config.script_timeout.as_duration(),
             default_model: nori_config.default_models.get(&config.model).cloned(),
+            initial_context: None,
         };
 
         // Race backend resume against shutdown requests and a timeout.

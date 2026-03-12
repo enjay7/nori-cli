@@ -116,6 +116,27 @@ impl ChatWidget {
         self.bottom_pane.show_selection_view(params);
     }
 
+    /// Open the file manager sub-picker.
+    #[cfg(feature = "nori-config")]
+    pub(crate) fn open_file_manager_picker(
+        &mut self,
+        current: Option<codex_acp::config::FileManager>,
+    ) {
+        let params = crate::nori::config_picker::file_manager_picker_params(
+            current,
+            self.app_event_tx.clone(),
+        );
+        self.bottom_pane.show_selection_view(params);
+    }
+
+    /// Open the vim mode sub-picker.
+    #[cfg(feature = "nori-config")]
+    pub(crate) fn open_vim_mode_picker(&mut self, current: codex_acp::config::VimEnterBehavior) {
+        let params =
+            crate::nori::config_picker::vim_mode_picker_params(current, self.app_event_tx.clone());
+        self.bottom_pane.show_selection_view(params);
+    }
+
     /// Open the auto-worktree sub-picker.
     #[cfg(feature = "nori-config")]
     pub(crate) fn open_auto_worktree_picker(&mut self, current: codex_acp::config::AutoWorktree) {
@@ -243,8 +264,8 @@ impl ChatWidget {
         self.bottom_pane.set_hotkey_config(config);
     }
 
-    pub(crate) fn set_vim_mode_enabled(&mut self, enabled: bool) {
-        self.bottom_pane.set_vim_mode_enabled(enabled);
+    pub(crate) fn set_vim_mode(&mut self, value: codex_acp::config::VimEnterBehavior) {
+        self.bottom_pane.set_vim_mode(value);
     }
 
     pub(crate) fn set_session_skillset_name(&mut self, name: Option<String>) {
@@ -302,6 +323,33 @@ impl ChatWidget {
                 }
             }
         });
+    }
+
+    /// Handle `/switch-skillset <name>` — directly switch to a named skillset
+    /// without showing the picker menu.
+    pub(crate) fn handle_switch_skillset_command_with_name(&mut self, name: &str) {
+        use crate::nori::skillset_picker;
+
+        if !skillset_picker::is_nori_skillsets_available() {
+            self.add_info_message(skillset_picker::not_installed_message(), None);
+            return;
+        }
+
+        let is_in_worktree = crate::system_info::extract_worktree_name(&self.config.cwd).is_some();
+        let skillset_per_session = codex_acp::config::NoriConfig::load()
+            .map(|c| c.skillset_per_session)
+            .unwrap_or(false);
+        let install_dir = if is_in_worktree || skillset_per_session {
+            Some(self.config.cwd.clone())
+        } else {
+            None
+        };
+
+        if let Some(dir) = install_dir {
+            self.on_switch_skillset_request(name, &dir);
+        } else {
+            self.on_install_skillset_request(name);
+        }
     }
 
     /// Handle the result of listing skillsets.

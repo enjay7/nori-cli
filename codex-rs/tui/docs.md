@@ -66,6 +66,7 @@ The selective flush ensures tool cells that are already visible transition from 
 
 **Begin/End Pairing in `flush_completions_and_clear`**: Begin and End events for the same tool call are always paired in the FIFO queue (Begin precedes its End). When `flush_completions_and_clear` discards a Begin event, it records the `call_id` in a `HashSet`. When it encounters an End event, it checks whether the corresponding Begin was discarded. If so, the End is also discarded. Without this pairing, processing an End whose Begin was discarded causes `handle_exec_end_now` to create an orphan `ExecCell` with the raw `call_id` as the command name (e.g. "Ran toolu_01Lt49..."). This cascade deferral scenario arises when a tool Begin arrives while the queue is non-empty (even if the stream is no longer active), causing the Begin to be deferred and later discarded at task completion.
 
+**End-Without-Begin Fallback in `handle_exec_end_now`**: When `handle_exec_end_now` receives an `ExecCommandEndEvent` with no matching entry in `running_commands` (the `None` branch), it falls back to the End event's own `ev.command`, `ev.parsed_cmd`, and `ev.source` fields. This handles the case where the ACP translation layer in `@/codex-rs/acp/` intentionally skips emitting `ExecCommandBegin` -- for example, when a `ToolCall` has a generic title and no `raw_input`, the translator defers until the `ToolCallUpdate` with `Completed` status arrives, at which point it resolves the title and populates the End event's fields directly. The TUI then displays the resolved name (e.g. "Terminal") rather than the raw tool call ID.
 
 **Turn-Finished Gate** (`chatwidget/event_handlers.rs`):
 
@@ -78,6 +79,28 @@ The ACP protocol has no end-of-turn synchronization guarantee -- `PromptResponse
 
 The gate is checked at the entry point of `on_exec_command_begin()`, `on_exec_command_end()`, `on_mcp_tool_call_begin()`, and `on_mcp_tool_call_end()`. When `turn_finished` is true, these methods return immediately without rendering any UI. This is complementary to the interrupt queue -- the queue handles deferral during streaming within a turn, while `turn_finished` handles events that arrive after the turn ends entirely.
 
+**Turn-Boundary Cleanup of Incomplete Tool Cells** (`chatwidget/event_handlers.rs`):
+
+Because the `turn_finished` gate blocks late-arriving End events, tool cells that began but never received their End event would remain stuck in `active_cell` or `pending_exec_cells`, filling the viewport and blocking the agent's text from rendering. Both `on_agent_message()` and `on_task_complete()` now explicitly finalize incomplete cells at turn boundaries:
+
+```
+on_agent_message():
+  1. flush_answer_stream_with_separator()    -- finalize any in-progress text stream
+  2. finalize_active_cell_as_failed()        -- mark stuck active_cell as failed, flush to history
+  3. pending_exec_cells.drain_failed()       -- drain any queued incomplete cells
+  4. turn_finished = true                    -- close the gate
+  5. flush_completions_and_clear()           -- process deferred End events, discard stale Begins
+
+on_task_complete():
+  1. flush_answer_stream_with_separator()
+  2. flush_completions_and_clear()
+  3. pending_exec_cells.drain_failed()
+  4. finalize_active_cell_as_failed()        -- safety net for cells blocked by the gate
+  5. set_task_running(false)
+```
+
+`finalize_active_cell_as_failed()` (in `user_input.rs`) takes the cell from `active_cell`, calls `mark_failed()` on the underlying `ExecCell` or `McpToolCallCell`, and flushes it to history. This frees the viewport so subsequent content (the agent's response text) can be inserted via `insert_history_lines()`.
+
 The Nori-specific agent picker UI lives in `nori/agent_picker.rs`, allowing users to select between available ACP agents.
 
 **System Info Collection** (`system_info.rs`):
@@ -88,7 +111,7 @@ The `SystemInfo` struct collects environment data in a background thread to avoi
 |-------|--------|
 | `git_branch` | Git repository branch name |
 | `nori_profile` | Active Nori profile from `.nori-config.json` (reads `activeSkillset` first, then `agents.claude-code.profile.baseProfile`, then `profile.baseProfile`) |
-| `git_lines_added` / `git_lines_removed` | Git diff statistics |
+| `git_lines_added` / `git_lines_removed` | Git diff statistics relative to the merge-base with the default branch (PR-like stats) |
 | `is_worktree` | Whether CWD is a git worktree |
 | `worktree_name` | Last path component of CWD when parent directory is `.worktrees`; used to display the immutable worktree directory identifier in the footer |
 | `transcript_location` | Discovered transcript path and token usage when running within an agent environment |
@@ -96,11 +119,27 @@ The `SystemInfo` struct collects environment data in a background thread to avoi
 
 The `transcript_location` field includes both `token_usage` (total tokens) and `token_breakdown` (detailed input/output/cached breakdown) which are displayed in the TUI footer when Nori runs as a nested agent inside Claude Code, Codex, or Gemini.
 
+**Git Diff Base Resolution** (`system_info.rs: resolve_diff_base()`):
+
+The git diff stats are computed against the merge-base with the default branch, so they reflect what a PR would show rather than only uncommitted changes. The resolution order is:
+1. `origin/HEAD` via `git symbolic-ref` -- detects the remote's default branch name
+2. Falls back to checking if local `main` or `master` branches exist
+3. Computes `git merge-base HEAD <branch>` to find the common ancestor
+4. Falls back to `HEAD` if no default branch can be resolved (shows only uncommitted changes)
+
+Untracked files (via `git ls-files --others --exclude-standard`) are also counted: their line counts are added to the insertion total. Binary files (non-UTF-8) are silently skipped. This means the statusline stats include new files that haven't been `git add`ed yet.
+
 Two collection methods are provided:
 - `collect_for_directory()` - Basic collection without first-message matching (test-only)
 - `collect_for_directory_with_message()` - Preferred method that passes the first user message to the transcript discovery layer for accurate transcript identification across all agents
 
 The first-message is obtained from `ChatWidget::first_prompt_text()`, which stores the text of the first submitted prompt. This flows through `SystemInfoRefreshRequest` to the background worker, enabling accurate transcript matching when multiple sessions exist in the same project directory.
+
+**`/diff` Slash Command** (`get_git_diff.rs`):
+
+The `/diff` handler in `key_handling.rs` resolves the effective CWD from the `effective_cwd_tracker` (falling back to `config.cwd`) and passes it to `get_git_diff()`. This ensures `/diff` works correctly in git worktrees and directories different from the process launch directory. All git commands in `get_git_diff.rs` use `.current_dir()` when a directory is provided.
+
+`get_git_diff.rs` uses the same diff base resolution strategy as `system_info.rs` (`origin/HEAD` -> `main` -> `master` -> `HEAD` fallback), but implemented as async functions rather than the sync versions in `system_info.rs`. This duplication exists because the sync/async boundary makes sharing impractical. The result is that `/diff` output and the statusline diff stats are consistent -- both show PR-like diffs against the merge-base with the default branch.
 
 **Worktree Cleanup Warning:**
 
@@ -113,21 +152,23 @@ During background system info collection on unix, `check_worktree_cleanup()` run
 | `/agent` | Switch between available ACP agents (dynamically shows current agent name) |
 | `/model` | Choose model (dynamically shows current agent/model name) |
 | `/approvals` | Choose what Nori can do without approval (dynamically shows current approval mode) |
-| `/config` | Toggle TUI settings (vertical footer, terminal notifications, OS notifications, vim mode, auto worktree, per session skillsets, notify after idle, hotkeys, script timeout, loop count, footer segments) |
+| `/config` | Toggle TUI settings (vertical footer, terminal notifications, OS notifications, vim mode with enter behavior sub-picker, auto worktree, per session skillsets, notify after idle, hotkeys, script timeout, loop count, footer segments, file manager) |
+| `/browse` | Open a terminal file manager to browse and edit files |
 | `/new` | Start a new chat during a conversation |
 | `/resume` | Resume a previous ACP session |
 | `/init` | Create an AGENTS.md file with instructions |
 | `/resume-viewonly` | View a previous session transcript (read-only) |
 | `/compact` | Summarize conversation to prevent context limit |
 | `/undo` | Open undo snapshot picker to select a restore point |
-| `/diff` | Show git diff (including untracked files) |
+| `/diff` | Show PR-like git diff (changes since merge-base with default branch, plus untracked files) |
 | `/mention` | Mention a file |
 | `/status` | Show session configuration and context window usage |
 | `/first-prompt` | Show the first prompt from this session |
 | `/mcp` | List configured MCP tools |
 | `/login` | Log in to the current agent |
 | `/logout` | Show logout instructions |
-| `/switch-skillset` | Switch between available skillsets |
+| `/switch-skillset [name]` | Switch between available skillsets (with optional direct name) |
+| `/fork` | Rewind conversation to a previous message |
 | `/quit` | Exit Nori |
 | `/exit` | Exit Nori (alias for /quit) |
 
@@ -162,6 +203,23 @@ When the ACP backend sends a `ContextCompactedEvent` with a summary, `on_context
 4. Reprint the summary text as the first assistant message of the new session (temporarily clears `turn_finished` to allow streaming)
 
 When the event has no summary (core backend path), only the "Context compacted" info message is shown. This asymmetry exists because the core backend compacts history in-place without producing a summary for the TUI.
+
+**Fork Conversation (`/fork`) (`nori/fork_picker.rs`, `app_backtrack.rs`):**
+
+The `/fork` slash command lets users rewind to a previous user message and branch the conversation from that point. It is only available when no task is running (`available_during_task = false`). The flow:
+
+1. `SlashCommand::Fork` dispatches `AppEvent::OpenForkPicker`
+2. The handler calls `collect_user_messages()` in `app_backtrack.rs` to gather all user messages from the current session segment (messages after the last `SessionInfoCell`). If none exist, an info message is shown instead of the picker.
+3. `fork_picker_params()` in `nori/fork_picker.rs` builds a `SelectionViewParams` with items displayed newest-first (reversed from chronological order). Message previews are truncated to 80 characters; multiline messages show only the first line with an ellipsis.
+4. Selecting a message fires `AppEvent::ForkToMessage { nth_user_message, prefill }`
+5. The `ForkToMessage` handler:
+   - Calls `build_fork_summary()` to create a plain-text summary of the conversation up to (but not including) the selected message, formatted as `User: ...\nAssistant: ...\n` pairs
+   - Shuts down the current conversation
+   - Creates a new `ChatWidget` with `fork_context` set to the summary string
+   - Trims `transcript_cells` to the fork point via `trim_transcript_cells_to_nth_user()` so the TUI preserves visual history before the fork
+   - Prefills the composer with the selected message text
+
+The fork context flows through `ChatWidgetInit.fork_context` -> `spawn_agent()` -> `spawn_acp_agent()` -> `AcpBackendConfig.initial_context`, which initializes the ACP backend's `pending_compact_summary`. This reuses the same mechanism as `/compact` and `/resume` -- the summary is prepended to the first user prompt in the new session, giving the agent prior conversation context without a protocol-level session fork.
 
 Debug-only commands (not shown in help): `/rollout`, `/test-approval`
 
@@ -208,6 +266,8 @@ The `/switch-skillset` command integrates with the external `nori-skillsets` CLI
 5. On selection, if an `install_dir` is set (worktree context), runs `nori-skillsets --non-interactive switch <NAME> --install-dir <path>`; otherwise runs `nori-skillsets --non-interactive install <NAME>`. The `--non-interactive` flag is required because the TUI captures stdout/stderr via `.output()` and provides no stdin, so any interactive prompt would hang indefinitely.
 6. Shows the install output as a confirmation message (for long output, extracts the last section after double newlines)
 7. On successful switch/install, updates `ChatWidget.session_skillset_name` which flows to the footer
+
+**Argument shortcut:** `/switch-skillset <name>` (e.g., `/switch-skillset foobar`) bypasses the picker entirely and directly triggers the install or switch. This is intercepted in `submit_user_message()` in `chatwidget/user_input.rs` before the text is sent to the model, following the same `strip_prefix` + early-return pattern used by `/login <agent>`. The handler `handle_switch_skillset_command_with_name()` in `chatwidget/pickers.rs` performs the same worktree/per-session detection as the picker flow but skips the async list step, calling `on_switch_skillset_request()` or `on_install_skillset_request()` directly. An empty name after the prefix (e.g., `/switch-skillset ` with trailing space only) is not intercepted and falls through to normal message submission.
 
 The worktree context is detected by `handle_switch_skillset_command()`: if the cwd's parent directory is named `.worktrees`, the cwd is passed as `install_dir`. When `skillset_per_session` is enabled, the cwd is used as `install_dir` even when not in a worktree. This enables per-worktree or per-session skillset installation.
 
@@ -281,12 +341,22 @@ The hotkey picker (`@/codex-rs/tui/src/nori/hotkey_picker.rs`) implements `Botto
 
 **Vim Mode:**
 
-The textarea supports an optional vim-style navigation mode, toggled via `/config` ("Vim Mode" item) and persisted to `config.toml` under `[tui]`:
+The textarea supports an optional vim-style navigation mode, configured via `/config` ("Vim Mode" item) which opens a sub-picker (like Auto Worktree) showing three options. The setting is persisted to `config.toml` under `[tui]`:
 
 ```toml
 [tui]
-vim_mode = true
+vim_mode = "newline"  # or "submit" or "off"
 ```
+
+The `VimEnterBehavior` enum (from `@/codex-rs/acp/src/config/types/mod.rs`) controls both whether vim mode is enabled and how the Enter key behaves:
+
+| Variant | Enter in INSERT | Enter in NORMAL | Vim Enabled |
+|---------|----------------|-----------------|-------------|
+| `Newline` | Inserts newline | Submits prompt | Yes |
+| `Submit` | Submits prompt | Inserts newline | Yes |
+| `Off` | N/A (vim disabled) | N/A | No |
+
+The `ChatComposer` stores a `vim_enter_behavior: VimEnterBehavior` field alongside the textarea's own `vim_mode_enabled: bool`. The textarea only cares about on/off (for the vim state machine), while the composer uses the full enum to route Enter key presses at the top of its Enter handler in `key_handling.rs`.
 
 When enabled, the textarea operates in two modes:
 
@@ -323,7 +393,7 @@ The grouping mechanism uses `begin_undo_group()` / `end_undo_group()`: entering 
 
 The state machine is implemented in `textarea/mod.rs` via the `VimModeState` enum. Vim mode handling runs as "stage 0" in the `input()` method, before C0 control fallbacks, configurable hotkey bindings, and hardcoded bindings. When in Normal mode, `chat_composer/mod.rs` bypasses paste burst detection and sends input directly to the textarea so navigation keys work without interference.
 
-Config changes emit `AppEvent::SetConfigVimMode`, handled in `app/config_persistence.rs` via `persist_vim_mode_setting()`. The setting propagates down the same chain as hotkeys: App -> ChatWidget -> BottomPane -> ChatComposer -> TextArea via `set_vim_mode_enabled()`. When vim mode is disabled, the state resets to Insert mode.
+Config changes use two app events: `AppEvent::OpenVimModePicker` opens the sub-picker, and `AppEvent::SetConfigVimMode(VimEnterBehavior)` applies the selection. The setting propagates down the same chain as hotkeys: App -> ChatWidget -> BottomPane -> ChatComposer via `set_vim_mode()`. The ChatComposer updates both its `vim_enter_behavior` field and calls `set_vim_mode_enabled()` on the textarea (passing `is_enabled()`). When vim mode is disabled, the textarea state resets to Insert mode. Persistence is handled by `persist_vim_mode_setting()` in `app/config_persistence.rs`, which writes the `toml_value()` string to the `[tui]` section.
 
 
 **History Search (Configurable Hotkey):**
@@ -392,6 +462,21 @@ The external editor hotkey (default Ctrl-G, configurable via hotkeys) opens the 
 6. On success, reads the temp file content back into the composer; on failure or non-zero exit, discards changes
 
 This uses the same terminal suspend/resume pattern as job control in `lib.rs` (SIGTSTP handling).
+
+**File Browsing (`/browse`):**
+
+The `/browse` slash command launches a configurable terminal file manager in chooser mode, then opens the selected file in the user's editor. It is available during task execution. The flow in `app/session_setup.rs::browse_files()`:
+
+1. Creates a temp file (`nori-browse-*.txt`) for the file manager to write the chosen path into
+2. Suspends the TUI via `tui::restore()`
+3. Spawns the file manager with chooser-mode arguments (from `FileManager::chooser_args()` in `@/codex-rs/acp/src/config/types/mod.rs`)
+4. On success, reads the first line of the temp file as the selected path
+5. If the selected path is a file, opens it in the user's editor using the same `editor::resolve_editor()` / `editor::spawn_editor()` as Ctrl-G
+6. Re-enables the TUI via `tui::set_modes()`
+
+When `/browse` is invoked, `SlashCommand::Browse` dispatches by loading `NoriConfig` to check `file_manager`. If `None`, an error message directs the user to `/config`. If set, it sends `AppEvent::BrowseFiles(fm)`.
+
+The file manager setting is configurable via `/config` -> "File Manager" which opens a sub-picker (same pattern as auto worktree). The sub-picker is built by `file_manager_picker_params()` in `@/codex-rs/tui/src/nori/config_picker.rs` and uses `AppEvent::OpenFileManagerPicker` / `AppEvent::SetConfigFileManager` events for the two-step flow. The setting is persisted to `[tui]` in `config.toml` via `persist_file_manager_setting()`.
 
 **View-Only Transcript Viewing:**
 The `/resume-viewonly` command allows viewing previous session transcripts without replaying the conversation. Implementation in `@/codex-rs/tui/src/`:
@@ -506,20 +591,21 @@ State fields on `ChatWidget`: `loop_remaining: Option<i32>` and `loop_total: Opt
 
 The loop is cancelled (both fields set to `None`) when an error occurs (`on_error()`) or the user interrupts (`on_interrupted_turn()`). The `/config` sub-picker is a custom `BottomPaneView` implemented by `LoopCountPickerView` in `@/codex-rs/tui/src/nori/loop_count_picker.rs`. It offers preset options (Disabled, 2, 3, 5, 10) plus a "Custom..." option that enters an input mode where the user can type an arbitrary number (2-1000). Values <= 1 are treated as disabled, values > 1000 are capped. This follows the same `BottomPaneView` pattern used by `HotkeyPickerView`. The setting persists to `[tui]` in `config.toml` via `persist_loop_count_setting()`.
 
-**History Insertion and Scrollback (`insert_history.rs`):**
+**History Insertion and Scrollback (`insert_history.rs`, `tui.rs`):**
 
-`insert_history_lines()` pushes content into the terminal's native scrollback buffer above the ratatui viewport without disturbing ratatui's diff-based renderer. It works by manipulating ANSI scroll regions (DECSTBM, `\x1b[Pt;Pbr`) directly against the crossterm backend writer, bypassing the normal ratatui render pass.
+`insert_history_lines()` pushes content into the terminal's native scrollback buffer above the ratatui viewport without disturbing ratatui's diff-based renderer. It works by manipulating ANSI scroll regions (DECSTBM, `\x1b[Pt;Pbr`) directly against the crossterm backend writer, bypassing the normal ratatui render pass. It returns `io::Result<bool>` where `false` means no room was available above the viewport (`area.top() == 0`) and the lines were not inserted.
 
 The insertion algorithm:
 
 ```
 1. If viewport is not at screen bottom: scroll viewport downward using RI (ESC M) inside
    a temporary scroll region covering [viewport.top()+1 .. screen_height].
-2. Early return if area.top() == 0 (viewport fills the whole screen; no space above it).
+2. Early return false if area.top() == 0 (viewport fills the whole screen; no space above it).
 3. Set scroll region to [1 .. area.top()] (only the history area above the viewport).
 4. Write lines into that region with \r\n advancement.
 5. Reset scroll region to full screen.
 6. Restore cursor to its pre-call position.
+7. Return true.
 ```
 
 The critical invariant: **DECSTBM `Pb=0` means "bottom of screen"**, not row 0. Calling `SetScrollRegion(1..0)` when `area.top() == 0` produces `\x1b[1;0r`, which sets the scroll region to the entire terminal rather than an empty region. Any subsequent writes then scroll through the viewport, corrupting ratatui's content in ways the diff-based renderer cannot detect. The `area.top() == 0` early return guards against this.
@@ -527,6 +613,33 @@ The critical invariant: **DECSTBM `Pb=0` means "bottom of screen"**, not row 0. 
 Two crossterm `Command` implementations support the function:
 - `SetScrollRegion(Range<u16>)` — emits `\x1b[{start};{end}r`
 - `ResetScrollRegion` — emits `\x1b[r` (restores full-screen scrolling)
+
+**Viewport Repositioning in the Draw Loop (`tui.rs` `Tui::draw`):**
+
+The draw loop manages viewport position bidirectionally to ensure the viewport stays anchored to the bottom of the terminal screen:
+
+```
+area.bottom() > size.height  --> viewport grew past screen bottom
+                                  scroll history up, reposition viewport to bottom
+
+area.y == 0 && height < size --> viewport was full-screen and has shrunk
+                                  write pending lines directly into vacated rows,
+                                  then reposition viewport to bottom
+```
+
+Both branches set `area.y = size.height - area.height`. The shrink branch guards on `area.y == 0` specifically because the stale-content problem only occurs when the viewport was at the top of the screen (full-screen). Normal height fluctuations where `area.y > 0` do not need repositioning because the viewport is already positioned with room above it.
+
+When the shrink branch fires, the rows above the new viewport position contain stale rendered widget content from when the viewport was full-screen. Using `insert_history_lines()` here would push that stale content into terminal scrollback via the DECSTBM scroll region mechanism. Instead, the draw loop calls `write_pending_lines_directly()` to overwrite those rows in-place. If there are no pending history lines, the vacated rows are cleared directly.
+
+**Direct Write for Vacated Rows (`insert_history.rs` `write_pending_lines_directly`):**
+
+`write_pending_lines_directly()` writes history lines to specific terminal positions using `MoveTo` commands without scroll regions. This prevents stale viewport content from leaking into terminal scrollback. It is only used during the viewport shrink-from-full-screen transition in `Tui::draw`.
+
+The function bottom-aligns content within the available rows (the last consumed line sits immediately above the viewport). It word-wraps each line individually to count screen rows, drains as many lines as fit from the input `Vec`, clears any remaining rows above the written content, then writes each wrapped line at its target position. Unconsumed lines remain in the `Vec` for later insertion via `insert_history_lines()`.
+
+**Pending History Lines Retry Semantics:**
+
+`Tui` holds a `pending_history_lines: Vec<Line>` buffer. On each draw, if the buffer is non-empty, `insert_history_lines()` is called. The buffer is only cleared when `insert_history_lines` returns `true` (lines were actually inserted). When it returns `false` (viewport at `y=0`, no room), the buffer is retained and insertion is retried on subsequent draws. This means once the viewport repositioning logic moves the viewport away from `y=0`, the retained lines will be inserted on the next frame. The buffer is capped at 1000 lines to prevent unbounded growth while the viewport is full-screen and insertion is blocked.
 
 ### Things to Know
 

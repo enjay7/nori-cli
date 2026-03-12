@@ -397,6 +397,107 @@ impl<'de> Deserialize<'de> for AutoWorktree {
 }
 
 // ============================================================================
+// Vim Enter Behavior Configuration
+// ============================================================================
+
+/// How the Enter key behaves when vim mode is active.
+///
+/// This setting doubles as the vim mode on/off switch: `Off` disables vim mode
+/// entirely, while the other variants enable vim mode with the chosen Enter
+/// key semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VimEnterBehavior {
+    /// Enter inserts a newline in INSERT mode, submits in NORMAL mode.
+    Newline,
+    /// Enter submits in INSERT mode, inserts a newline in NORMAL mode.
+    Submit,
+    /// Vim mode is disabled.
+    #[default]
+    Off,
+}
+
+impl VimEnterBehavior {
+    /// Human-readable name for display in the TUI.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Newline => "Enter is Newline",
+            Self::Submit => "Enter is Submit",
+            Self::Off => "Off",
+        }
+    }
+
+    /// TOML string representation for persistence.
+    pub fn toml_value(&self) -> &'static str {
+        match self {
+            Self::Newline => "newline",
+            Self::Submit => "submit",
+            Self::Off => "off",
+        }
+    }
+
+    /// All variants in order, for building picker UIs.
+    pub fn all_variants() -> &'static [VimEnterBehavior] {
+        &[Self::Newline, Self::Submit, Self::Off]
+    }
+
+    /// Returns true if vim mode is enabled (i.e. not Off).
+    pub fn is_enabled(&self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
+impl Serialize for VimEnterBehavior {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.toml_value())
+    }
+}
+
+impl<'de> Deserialize<'de> for VimEnterBehavior {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VimEnterBehaviorVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for VimEnterBehaviorVisitor {
+            type Value = VimEnterBehavior;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a boolean or one of \"newline\", \"submit\", \"off\"")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<VimEnterBehavior, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(if value {
+                    VimEnterBehavior::Submit
+                } else {
+                    VimEnterBehavior::Off
+                })
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<VimEnterBehavior, E>
+            where
+                E: serde::de::Error,
+            {
+                match value {
+                    "newline" => Ok(VimEnterBehavior::Newline),
+                    "submit" => Ok(VimEnterBehavior::Submit),
+                    "off" => Ok(VimEnterBehavior::Off),
+                    _ => Err(E::unknown_variant(value, &["newline", "submit", "off"])),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(VimEnterBehaviorVisitor)
+    }
+}
+
+// ============================================================================
 // Script Timeout Configuration
 // ============================================================================
 
@@ -1192,8 +1293,9 @@ pub struct TuiConfigToml {
     /// How long after idle before sending a notification.
     pub notify_after_idle: Option<NotifyAfterIdle>,
 
-    /// Enable vim-style navigation mode in the textarea.
-    pub vim_mode: Option<bool>,
+    /// Vim mode and Enter key behavior. Accepts `true`/`false` for backwards
+    /// compatibility or one of `"newline"`, `"submit"`, `"off"`.
+    pub vim_mode: Option<VimEnterBehavior>,
 
     /// Configurable hotkey bindings.
     #[serde(default)]
@@ -1215,6 +1317,9 @@ pub struct TuiConfigToml {
 
     /// Enable per-session skillset isolation.
     pub skillset_per_session: Option<bool>,
+
+    /// Terminal file manager for the `/browse` command.
+    pub file_manager: Option<FileManager>,
 }
 
 /// Resolved TUI configuration
@@ -1241,6 +1346,60 @@ impl Default for TuiConfig {
             os_notifications: OsNotifications::Enabled,
             vertical_footer: false,
         }
+    }
+}
+
+/// Supported terminal file managers for the `/browse` command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FileManager {
+    /// vifm — chooser flag: `--choose-files <path>`
+    Vifm,
+    /// ranger — chooser flag: `--choosefile=<path>`
+    Ranger,
+    /// lf — chooser flag: `-selection-path <path>`
+    Lf,
+    /// nnn — chooser flag: `-p <path>`
+    Nnn,
+}
+
+impl FileManager {
+    /// Returns the binary name to invoke.
+    pub fn command_name(self) -> &'static str {
+        match self {
+            Self::Vifm => "vifm",
+            Self::Ranger => "ranger",
+            Self::Lf => "lf",
+            Self::Nnn => "nnn",
+        }
+    }
+
+    /// Returns CLI arguments that put the file manager into chooser mode,
+    /// writing the selected file path(s) to `output_path`.
+    pub fn chooser_args(self, output_path: &std::path::Path) -> Vec<String> {
+        let path = output_path.display().to_string();
+        match self {
+            Self::Vifm => vec!["--choose-files".to_string(), path],
+            Self::Ranger => vec![format!("--choosefile={path}")],
+            Self::Lf => vec!["-selection-path".to_string(), path],
+            Self::Nnn => vec!["-p".to_string(), path],
+        }
+    }
+
+    /// Human-friendly name shown in the config picker.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Vifm => "vifm",
+            Self::Ranger => "ranger",
+            Self::Lf => "lf",
+            Self::Nnn => "nnn",
+        }
+    }
+}
+
+impl fmt::Display for FileManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.display_name())
     }
 }
 
@@ -1308,8 +1467,8 @@ pub struct NoriConfig {
     /// How long after idle before sending a notification.
     pub notify_after_idle: NotifyAfterIdle,
 
-    /// Enable vim-style navigation mode in the textarea.
-    pub vim_mode: bool,
+    /// Vim mode and Enter key behavior.
+    pub vim_mode: VimEnterBehavior,
 
     /// Configurable hotkey bindings.
     pub hotkeys: HotkeyConfig,
@@ -1326,6 +1485,10 @@ pub struct NoriConfig {
 
     /// Enable per-session skillset isolation.
     pub skillset_per_session: bool,
+
+    /// Terminal file manager for the `/browse` command.
+    /// `None` means not configured.
+    pub file_manager: Option<FileManager>,
 
     /// Footer segment visibility configuration.
     pub footer_segment_config: FooterSegmentConfig,
@@ -1407,12 +1570,13 @@ impl Default for NoriConfig {
             os_notifications: OsNotifications::Enabled,
             vertical_footer: false,
             notify_after_idle: NotifyAfterIdle::default(),
-            vim_mode: false,
+            vim_mode: VimEnterBehavior::Off,
             hotkeys: HotkeyConfig::default(),
             script_timeout: ScriptTimeout::default(),
             loop_count: None,
             auto_worktree: AutoWorktree::Off,
             skillset_per_session: false,
+            file_manager: None,
             footer_segment_config: FooterSegmentConfig::default(),
             nori_home: PathBuf::from(".nori/cli"),
             cwd: std::env::current_dir().unwrap_or_default(),

@@ -438,6 +438,63 @@ impl acp::Agent for MockAgent {
             return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
         }
 
+        // Reproduce the stuck ExecCell bug: tool calls that Begin but never
+        // Complete before the agent sends its final text response. This causes
+        // incomplete ExecCells to fill the viewport and block the agent's message
+        // from rendering. The fix (finalize_active_cell_as_failed) should clean
+        // up these cells so the agent text is visible.
+        if std::env::var("MOCK_AGENT_STUCK_TOOL_CALLS").is_ok() {
+            eprintln!("Mock agent: sending stuck tool calls (no completion)");
+
+            // Send 3 Read tool calls that will never complete
+            let read_1 = acp::ToolCallId::new("stuck-read-001");
+            let read_2 = acp::ToolCallId::new("stuck-read-002");
+            let read_3 = acp::ToolCallId::new("stuck-read-003");
+
+            self.send_tool_call(
+                session_id.clone(),
+                acp::ToolCall::new(read_1, "Reading app.rs")
+                    .kind(acp::ToolKind::Read)
+                    .status(acp::ToolCallStatus::Pending)
+                    .raw_input(json!({"path": "src/app.rs"})),
+            )
+            .await?;
+
+            sleep(Duration::from_millis(30)).await;
+
+            self.send_tool_call(
+                session_id.clone(),
+                acp::ToolCall::new(read_2, "Reading config.rs")
+                    .kind(acp::ToolKind::Read)
+                    .status(acp::ToolCallStatus::Pending)
+                    .raw_input(json!({"path": "src/config.rs"})),
+            )
+            .await?;
+
+            sleep(Duration::from_millis(30)).await;
+
+            self.send_tool_call(
+                session_id.clone(),
+                acp::ToolCall::new(read_3, "Reading main.rs")
+                    .kind(acp::ToolKind::Read)
+                    .status(acp::ToolCallStatus::Pending)
+                    .raw_input(json!({"path": "src/main.rs"})),
+            )
+            .await?;
+
+            sleep(Duration::from_millis(50)).await;
+
+            // Send the agent's final text WITHOUT completing any tool calls.
+            // The TUI must still render this text by finalizing the stuck cells.
+            self.send_text_chunk(
+                session_id.clone(),
+                "Analysis complete despite incomplete tool calls.",
+            )
+            .await?;
+
+            return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
+        }
+
         // Reproduce the race condition where tool call completions arrive DURING
         // the final text stream. These get deferred into the interrupt queue, then
         // flushed after the agent's final message - causing a trailing dump of tool
@@ -626,6 +683,48 @@ impl acp::Agent for MockAgent {
             let value = std::env::var(&env_name).unwrap_or_else(|_| "<unset>".to_string());
             let msg = format!("ENV:{env_name}={value}");
             self.send_text_chunk(session_id.clone(), &msg).await?;
+            return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
+        }
+
+        // Support generic tool call with no raw_input to test the "skipped Begin" path.
+        // When a ToolCall has a generic title and no raw_input, the ACP translation layer
+        // skips emitting ExecCommandBegin and only emits ExecCommandEnd on completion.
+        // This tests that the TUI correctly uses ev.command (not ev.call_id) for display.
+        if std::env::var("MOCK_AGENT_GENERIC_TOOL_CALL").is_ok() {
+            eprintln!("Mock agent: sending generic tool call (no raw_input)");
+
+            let tool_call_id = acp::ToolCallId::new("toolu_generic_test_001");
+
+            // Send ToolCall with generic title and NO raw_input
+            // This will be skipped by the translator (no useful display info)
+            self.send_tool_call(
+                session_id.clone(),
+                acp::ToolCall::new(tool_call_id.clone(), "Terminal")
+                    .kind(acp::ToolKind::Execute)
+                    .status(acp::ToolCallStatus::Pending),
+            )
+            .await?;
+
+            sleep(Duration::from_millis(50)).await;
+
+            // Send completion directly (no intermediate update with better title)
+            self.send_tool_call_update(
+                session_id.clone(),
+                acp::ToolCallUpdate::new(
+                    tool_call_id.clone(),
+                    acp::ToolCallUpdateFields::new()
+                        .status(acp::ToolCallStatus::Completed)
+                        .content(vec![acp::ToolCallContent::Content(acp::Content::new(
+                            acp::ContentBlock::Text(acp::TextContent::new("command output here")),
+                        ))])
+                        .raw_output(json!({"exit_code": 0, "stdout": "command output here"})),
+                ),
+            )
+            .await?;
+
+            self.send_text_chunk(session_id.clone(), "Generic tool call done.")
+                .await?;
+
             return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
         }
 

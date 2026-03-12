@@ -15,6 +15,7 @@ pub use types::AgentDistributionToml;
 pub use types::ApprovalPolicy;
 pub use types::AutoWorktree;
 pub use types::DEFAULT_AGENT;
+pub use types::FileManager;
 pub use types::FooterSegment;
 pub use types::FooterSegmentConfig;
 pub use types::FooterSegmentConfigToml;
@@ -37,6 +38,7 @@ pub use types::ResolvedDistribution;
 pub use types::ScriptTimeout;
 pub use types::TerminalNotifications;
 pub use types::TuiConfig;
+pub use types::VimEnterBehavior;
 pub use types::resolve_hook_paths;
 
 #[cfg(test)]

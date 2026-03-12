@@ -28,6 +28,8 @@ Used by `@/codex-rs/tui-pty-e2e/` for end-to-end integration testing. The mock a
 
 **Environment Variable Echo**: The `MOCK_AGENT_ECHO_ENV` env var causes the mock agent's `prompt()` handler to respond with `ENV:<name>=<value>` (or `ENV:<name>=<unset>` if the variable is absent). Used by `test_codex_home_not_inherited_by_agent_subprocess` in `@/codex-rs/acp/src/connection/tests.rs` to verify that the parent's `CODEX_HOME` is not inherited by the spawned ACP subprocess.
 
+**Stuck Tool Calls (No Completion)**: The `MOCK_AGENT_STUCK_TOOL_CALLS` env var triggers a scenario where 3 Read tool calls are sent with `Pending` status but never receive completion updates. After a short delay the agent sends its final text response and ends the turn. This reproduces the frozen-display bug where incomplete ExecCells fill the viewport and block `insert_history_lines()` from rendering the agent's text. The fix under test is `finalize_active_cell_as_failed()` in `@/codex-rs/tui/src/chatwidget.rs`.
+
 **Race Condition Simulation**: The `MOCK_AGENT_TOOL_CALLS_DURING_FINAL_STREAM` env var triggers a scenario that reproduces the timing where tool call completions arrive while the final text response is streaming. This is structured in phases:
 1. Tool calls that complete before text streaming starts (rendered normally)
 2. Text streaming begins (activates the TUI's stream_controller)
@@ -43,6 +45,8 @@ This simulates the real-world race condition that the `InterruptManager.flush_co
 4. Tool B Begin deferred (queue non-empty -- cascade deferral)
 5. Tool B End deferred
 6. Turn ends -- `flush_completions_and_clear` must discard both Begin-B and End-B to avoid creating an orphan `ExecCell` with the raw `call_id` as the command name
+
+**Skipped-Begin / Generic Tool Call**: The `MOCK_AGENT_GENERIC_TOOL_CALL` env var triggers a scenario where a `ToolCall` is sent with a generic title ("Terminal") and no `raw_input`. The ACP translation layer in `@/codex-rs/acp/` skips emitting `ExecCommandBegin` for such calls (no useful display info). On completion, only `ExecCommandEnd` is emitted with the resolved title. This tests the TUI's `handle_exec_end_now` `None` branch -- that it uses `ev.command` from the End event instead of falling back to the raw `call_id`.
 
 **Client Requests**: Outbound requests to the client:
 - `ReadFile` - Request file contents

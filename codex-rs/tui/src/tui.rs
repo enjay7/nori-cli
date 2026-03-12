@@ -407,6 +407,40 @@ impl Tui {
                     .backend_mut()
                     .scroll_region_up(0..area.top(), area.bottom() - size.height)?;
                 area.y = size.height - area.height;
+            } else if area.y == 0 && area.height < size.height {
+                // Viewport was full-screen (y=0) and has shrunk. Reposition
+                // to bottom so insert_history_lines has room above.
+                let new_y = size.height - area.height;
+                area.y = new_y;
+
+                // Set viewport area and clear BEFORE writing history into
+                // the vacated rows. clear() erases from viewport_area.y
+                // downward, so we must reposition first to avoid wiping
+                // content we're about to paint above the viewport.
+                terminal.set_viewport_area(area);
+                terminal.clear()?;
+
+                // Write pending history lines directly into the vacated rows
+                // to avoid pushing stale viewport content into scrollback.
+                if !self.pending_history_lines.is_empty() {
+                    crate::insert_history::write_pending_lines_directly(
+                        terminal,
+                        &mut self.pending_history_lines,
+                        new_y,
+                    )?;
+                } else {
+                    // No pending lines — just clear the stale rows.
+                    let writer = terminal.backend_mut();
+                    for row in 0..new_y {
+                        crossterm::queue!(
+                            writer,
+                            crossterm::cursor::MoveTo(0, row),
+                            crossterm::terminal::Clear(
+                                crossterm::terminal::ClearType::UntilNewLine
+                            )
+                        )?;
+                    }
+                }
             }
             if area != terminal.viewport_area {
                 // TODO(nornagon): probably this could be collapsed with the clear + set_viewport_area above.
@@ -415,11 +449,20 @@ impl Tui {
             }
 
             if !self.pending_history_lines.is_empty() {
-                crate::insert_history::insert_history_lines(
+                // Cap pending lines to avoid unbounded growth if insertion
+                // is blocked for an extended period (e.g., full-screen widget).
+                const MAX_PENDING_LINES: usize = 1000;
+                if self.pending_history_lines.len() > MAX_PENDING_LINES {
+                    let excess = self.pending_history_lines.len() - MAX_PENDING_LINES;
+                    self.pending_history_lines.drain(..excess);
+                }
+                let inserted = crate::insert_history::insert_history_lines(
                     terminal,
                     self.pending_history_lines.clone(),
                 )?;
-                self.pending_history_lines.clear();
+                if inserted {
+                    self.pending_history_lines.clear();
+                }
             }
 
             // Update the y position for suspending so Ctrl-Z can place the cursor correctly.

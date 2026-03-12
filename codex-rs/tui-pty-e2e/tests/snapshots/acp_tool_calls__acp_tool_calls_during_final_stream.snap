@@ -4,7 +4,6 @@ expression: normalize_for_input_snapshot(contents)
 ---
 › Analyze the codebase
 
-
 • Explored
   └ Read file1.rs, file2.rs
 
@@ -20,7 +19,6 @@ expression: normalize_for_input_snapshot(contents)
 ────────────────────────────────────────────────────────────────────────────────
 
 • Let me know if you need anything else.
-
 
 › [DEFAULT_PROMPT]
 

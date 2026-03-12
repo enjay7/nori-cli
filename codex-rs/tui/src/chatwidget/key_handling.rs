@@ -178,11 +178,39 @@ impl ChatWidget {
             SlashCommand::Undo => {
                 self.app_event_tx.send(AppEvent::CodexOp(Op::UndoList));
             }
+            #[cfg(feature = "nori-config")]
+            SlashCommand::Browse => match codex_acp::config::NoriConfig::load() {
+                Ok(nori_config) => match nori_config.file_manager {
+                    Some(fm) => {
+                        self.app_event_tx.send(AppEvent::BrowseFiles(fm));
+                    }
+                    None => {
+                        self.add_error_message(
+                            "No file manager configured. Use /config to set one.".to_string(),
+                        );
+                    }
+                },
+                Err(err) => {
+                    self.add_error_message(format!("Failed to load config: {err}"));
+                }
+            },
+            #[cfg(not(feature = "nori-config"))]
+            SlashCommand::Browse => {
+                self.add_info_message(
+                    "Browse command requires the nori-config feature".to_string(),
+                    None,
+                );
+            }
             SlashCommand::Diff => {
                 self.add_diff_in_progress();
                 let tx = self.app_event_tx.clone();
+                let dir = self
+                    .effective_cwd_tracker
+                    .effective_cwd()
+                    .cloned()
+                    .unwrap_or_else(|| self.config.cwd.clone());
                 tokio::spawn(async move {
-                    let text = match get_git_diff().await {
+                    let text = match get_git_diff(Some(&dir)).await {
                         Ok((is_git_repo, diff_text)) => {
                             if is_git_repo {
                                 diff_text
@@ -264,6 +292,9 @@ impl ChatWidget {
             }
             SlashCommand::SwitchSkillset => {
                 self.handle_switch_skillset_command();
+            }
+            SlashCommand::Fork => {
+                self.app_event_tx.send(AppEvent::OpenForkPicker);
             }
         }
     }

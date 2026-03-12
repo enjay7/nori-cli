@@ -35,6 +35,8 @@ Tests in this file verify that tool call events (Explored, Ran, Searched cells) 
 - Verifying that tool call completions arriving during the final text stream are NOT rendered after the agent's response (the `MOCK_AGENT_TOOL_CALLS_DURING_FINAL_STREAM` scenario)
 - Checking for absence of trailing tool output by asserting that screen content after the final agent message position contains no tool-related strings
 - Verifying that cascade-deferred tool events do not produce orphan cells (the `MOCK_AGENT_ORPHAN_TOOL_CELLS` scenario), where a Begin is deferred due to a non-empty queue and later discarded, but its End must also be discarded to avoid raw call_id rendering
+- Verifying that generic tool calls with no `raw_input` (the `MOCK_AGENT_GENERIC_TOOL_CALL` scenario) display a resolved semantic name from `ev.command` instead of the raw tool call ID, covering the case where the ACP translator skips `ExecCommandBegin` entirely
+- Verifying that incomplete (stuck) tool calls that never receive End events do not block the agent's final text from rendering (the `MOCK_AGENT_STUCK_TOOL_CALLS` scenario), where `finalize_active_cell_as_failed()` cleans up incomplete ExecCells on turn boundaries so `insert_history_lines()` can proceed
 
 **Debug Output**: Colorized output (via `owo-colors`) for test debugging:
 - Sent input highlighted
@@ -49,6 +51,6 @@ Tests in this file verify that tool call events (Explored, Ran, Searched cells) 
 - Timing-sensitive tests use configurable timeouts
 - Debug styles respect color terminal detection
 - Snapshot tests use `insta` for visual verification of screen output; snapshots live in `tests/snapshots/`
-- `normalize_for_input_snapshot()` normalizes dynamic content before snapshot comparison: session timestamps/IDs become `[TIMESTAMP]`/`[SESSION_ID]`, and the randomly selected whimsical status indicator header becomes `[STATUS]`. Tests that check for the status indicator being active use `"esc to interrupt"` as the stable anchor text rather than any specific status message.
+- `normalize_for_input_snapshot()` normalizes dynamic content before snapshot comparison: session timestamps/IDs become `[TIMESTAMP]`/`[SESSION_ID]`, and the randomly selected whimsical status indicator header becomes `[STATUS]`. It also collapses runs of consecutive blank lines into a single blank line, because PTY timing can cause the exact count of blank lines between content sections to vary between runs. Tests that check for the status indicator being active use `"esc to interrupt"` as the stable anchor text rather than any specific status message.
 
 Created and maintained by Nori.

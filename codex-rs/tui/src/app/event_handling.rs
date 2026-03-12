@@ -67,11 +67,12 @@ impl App {
                     vertical_footer: self.vertical_footer,
                     expected_agent: None, // No filtering for /new command
                     deferred_spawn: false,
+                    fork_context: None,
                 };
                 self.chat_widget = ChatWidget::new(init, self.server.clone());
                 self.chat_widget
                     .set_hotkey_config(self.hotkey_config.clone());
-                self.chat_widget.set_vim_mode_enabled(self.vim_mode_enabled);
+                self.chat_widget.set_vim_mode(self.vim_mode);
                 #[cfg(feature = "nori-config")]
                 self.chat_widget
                     .set_loop_count_override(self.loop_count_override);
@@ -134,11 +135,14 @@ impl App {
                 self.chat_widget.on_commit_tick();
             }
             AppEvent::CodexEvent(event) => {
-                if self.suppress_shutdown_complete
-                    && matches!(event.msg, EventMsg::ShutdownComplete)
-                {
-                    self.suppress_shutdown_complete = false;
-                    return Ok(true);
+                if self.suppress_shutdown_complete {
+                    if matches!(event.msg, EventMsg::ShutdownComplete) {
+                        self.suppress_shutdown_complete = false;
+                        return Ok(true);
+                    }
+                    if matches!(event.msg, EventMsg::TurnAborted(_)) {
+                        return Ok(true);
+                    }
                 }
                 self.chat_widget.handle_codex_event(event);
             }
@@ -577,11 +581,12 @@ impl App {
                     vertical_footer: self.vertical_footer,
                     expected_agent: Some(agent_name.clone()),
                     deferred_spawn: false,
+                    fork_context: None,
                 };
                 self.chat_widget = ChatWidget::new(init, self.server.clone());
                 self.chat_widget
                     .set_hotkey_config(self.hotkey_config.clone());
-                self.chat_widget.set_vim_mode_enabled(self.vim_mode_enabled);
+                self.chat_widget.set_vim_mode(self.vim_mode);
                 #[cfg(feature = "nori-config")]
                 self.chat_widget
                     .set_loop_count_override(self.loop_count_override);
@@ -754,6 +759,11 @@ impl App {
                 self.set_session_loop_count(value);
             }
             #[cfg(feature = "nori-config")]
+            AppEvent::OpenVimModePicker => {
+                let nori_config = codex_acp::config::NoriConfig::load().unwrap_or_default();
+                self.chat_widget.open_vim_mode_picker(nori_config.vim_mode);
+            }
+            #[cfg(feature = "nori-config")]
             AppEvent::OpenAutoWorktreePicker => {
                 let nori_config = codex_acp::config::NoriConfig::load().unwrap_or_default();
                 self.chat_widget
@@ -782,6 +792,20 @@ impl App {
                 self.persist_footer_segment_setting(segment, enabled).await;
             }
             #[cfg(feature = "nori-config")]
+            AppEvent::BrowseFiles(fm) => {
+                self.browse_files(fm, tui);
+            }
+            #[cfg(feature = "nori-config")]
+            AppEvent::SetConfigFileManager(value) => {
+                self.persist_file_manager_setting(value).await;
+            }
+            #[cfg(feature = "nori-config")]
+            AppEvent::OpenFileManagerPicker => {
+                let nori_config = codex_acp::config::NoriConfig::load().unwrap_or_default();
+                self.chat_widget
+                    .open_file_manager_picker(nori_config.file_manager);
+            }
+            #[cfg(feature = "nori-config")]
             AppEvent::LoopIteration {
                 prompt,
                 remaining,
@@ -803,11 +827,12 @@ impl App {
                     vertical_footer: self.vertical_footer,
                     expected_agent: None,
                     deferred_spawn: false,
+                    fork_context: None,
                 };
                 self.chat_widget = ChatWidget::new(init, self.server.clone());
                 self.chat_widget
                     .set_hotkey_config(self.hotkey_config.clone());
-                self.chat_widget.set_vim_mode_enabled(self.vim_mode_enabled);
+                self.chat_widget.set_vim_mode(self.vim_mode);
                 self.chat_widget
                     .set_loop_count_override(self.loop_count_override);
                 self.chat_widget.set_loop_state(remaining, total);
@@ -984,12 +1009,13 @@ impl App {
                             vertical_footer: self.vertical_footer,
                             expected_agent: None,
                             deferred_spawn: false,
+                            fork_context: None,
                         };
                         self.chat_widget =
                             ChatWidget::new_resumed_acp(init, acp_session_id, transcript);
                         self.chat_widget
                             .set_hotkey_config(self.hotkey_config.clone());
-                        self.chat_widget.set_vim_mode_enabled(self.vim_mode_enabled);
+                        self.chat_widget.set_vim_mode(self.vim_mode);
 
                         self.chat_widget.add_info_message(
                             format!("Resuming session with {display_name}..."),
@@ -1002,6 +1028,65 @@ impl App {
                             .add_error_message(format!("Failed to load session transcript: {e}"));
                     }
                 }
+            }
+            AppEvent::OpenForkPicker => {
+                let messages =
+                    crate::app_backtrack::collect_all_user_messages(&self.transcript_cells);
+                if messages.is_empty() {
+                    self.chat_widget
+                        .add_info_message("No messages to fork from.".to_string(), None);
+                } else {
+                    let params = crate::nori::fork_picker::fork_picker_params(
+                        messages,
+                        self.app_event_tx.clone(),
+                    );
+                    self.chat_widget.show_selection_view(params);
+                }
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::ForkToMessage {
+                cell_index,
+                prefill,
+            } => {
+                let summary =
+                    crate::app_backtrack::build_fork_summary(&self.transcript_cells, cell_index);
+                let fork_context = if summary.is_empty() {
+                    None
+                } else {
+                    Some(summary)
+                };
+
+                self.shutdown_current_conversation().await;
+                let init = crate::chatwidget::ChatWidgetInit {
+                    config: self.config.clone(),
+                    frame_requester: tui.frame_requester(),
+                    app_event_tx: self.app_event_tx.clone(),
+                    initial_prompt: None,
+                    initial_images: Vec::new(),
+                    enhanced_keys_supported: self.enhanced_keys_supported,
+                    auth_manager: self.auth_manager.clone(),
+                    vertical_footer: self.vertical_footer,
+                    expected_agent: None,
+                    deferred_spawn: false,
+                    fork_context,
+                };
+                self.chat_widget = ChatWidget::new(init, self.server.clone());
+                self.chat_widget
+                    .set_hotkey_config(self.hotkey_config.clone());
+                self.chat_widget.set_vim_mode(self.vim_mode);
+                #[cfg(feature = "nori-config")]
+                self.chat_widget
+                    .set_loop_count_override(self.loop_count_override);
+
+                // Trim transcript to preserve history before the fork point
+                self.transcript_cells
+                    .truncate(cell_index.min(self.transcript_cells.len()));
+                self.render_transcript_once(tui);
+
+                if !prefill.is_empty() {
+                    self.chat_widget.set_composer_text(prefill);
+                }
+                tui.frame_requester().schedule_frame();
             }
         }
         Ok(true)

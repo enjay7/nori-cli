@@ -144,13 +144,15 @@ The binding string format is kept terminal-agnostic (no crossterm dependency in 
 
 **Vim Mode Configuration** (`config/types/mod.rs`):
 
-The `vim_mode` boolean in `TuiConfigToml` and `NoriConfig` enables vim-style navigation in the textarea. Stored under `[tui]` in `config.toml`:
+The `vim_mode` field in `TuiConfigToml` and `NoriConfig` uses the `VimEnterBehavior` enum, which doubles as both the vim mode on/off switch and the Enter key behavior selector. Stored under `[tui]` in `config.toml`:
 
 | Field | TOML Key | Default | Controls |
 |-------|----------|---------|----------|
-| `vim_mode` | `vim_mode` | `false` | When enabled, textarea supports vim-style Insert/Normal mode with navigation, editing, and two-key sequences |
+| `vim_mode` | `vim_mode` | `"off"` | Vim mode and Enter key behavior: `"newline"` (Enter inserts newline in INSERT, submits in NORMAL), `"submit"` (Enter submits in INSERT, inserts newline in NORMAL), or `"off"` (vim disabled) |
 
-The setting is resolved in `loader.rs` with a default of `false`. Unlike hotkeys which are string bindings, vim mode is a simple boolean toggle. The TUI layer (`@/codex-rs/tui/`) handles the vim mode state machine and propagation.
+`VimEnterBehavior` has a custom `Deserialize` implementation that accepts both booleans and strings for backwards compatibility: `true` maps to `Submit`, `false` maps to `Off`. New string values are `"newline"`, `"submit"`, `"off"`. Serialization always writes the string form. The enum provides `is_enabled()` (returns `true` for any variant except `Off`), `display_name()` for TUI display, `toml_value()` for persistence, and `all_variants()` for building picker UIs.
+
+The TUI layer (`@/codex-rs/tui/`) handles the vim mode state machine and propagation. The `VimEnterBehavior` flows through the config pipeline: `NoriConfig` -> `App` -> `ChatWidget` -> `BottomPane` -> `ChatComposer`, where it controls how Enter key presses are routed in the key handler.
 
 **Script Timeout Configuration** (`config/types/mod.rs`):
 
@@ -194,8 +196,16 @@ Helper methods on `AutoWorktree`:
 |-------|----------|---------|----------|
 | `auto_worktree` | `auto_worktree` | `Off` | Worktree creation behavior at session start |
 | `skillset_per_session` | `skillset_per_session` | `false` | When enabled, each session gets its own skillset. Independent of `auto_worktree` -- does not force it on |
+| `file_manager` | `file_manager` | `None` | Terminal file manager for the `/browse` command |
 
-Both settings are resolved independently in `loader.rs`. The TUI layer (`@/codex-rs/tui/`) matches on the `AutoWorktree` variant in `lib.rs`: `Automatic` calls `setup_auto_worktree()` immediately, `Ask` defers to a TUI popup (`worktree_ask.rs`), and `Off` skips entirely. The config layer stores the enum value -- all orchestration lives in `@/codex-rs/acp/src/auto_worktree.rs` and `@/codex-rs/tui/src/lib.rs`.
+The `FileManager` enum (`types/mod.rs`) represents supported terminal file managers for the `/browse` slash command. Stored under `[tui]` in `config.toml` as a kebab-case string. Variants: `Vifm`, `Ranger`, `Lf`, `Nnn`. Each variant provides:
+- `command_name()` -- binary name to invoke (e.g. `"vifm"`, `"ranger"`)
+- `chooser_args(output_path)` -- CLI arguments that put the file manager into chooser mode, writing the selected file path to a temp file. Each file manager uses a different flag convention (e.g. vifm uses `--choose-files`, ranger uses `--choosefile=`, lf uses `-selection-path`, nnn uses `-p`)
+- `display_name()` -- human-friendly label for the config picker
+
+The field defaults to `None` (no file manager configured). The TUI layer (`@/codex-rs/tui/`) checks this value when the user invokes `/browse` and shows an error if unset, directing the user to `/config` to choose one. The `FileManager` type is re-exported from `codex_acp` for use by the TUI.
+
+Both `auto_worktree` and `skillset_per_session` are resolved independently in `loader.rs`. The TUI layer (`@/codex-rs/tui/`) matches on the `AutoWorktree` variant in `lib.rs`: `Automatic` calls `setup_auto_worktree()` immediately, `Ask` defers to a TUI popup (`worktree_ask.rs`), and `Off` skips entirely. The config layer stores the enum value -- all orchestration lives in `@/codex-rs/acp/src/auto_worktree.rs` and `@/codex-rs/tui/src/lib.rs`.
 
 **Auto-Worktree Branch Renaming** (`auto_worktree.rs`, `backend/mod.rs`):
 
@@ -439,9 +449,10 @@ The `parse_transcript_tokens()` function extracts token usage breakdown from tra
 
 ```rust
 pub struct TranscriptTokenUsage {
-    pub input_tokens: i64,    // Total input tokens
-    pub output_tokens: i64,   // Total output tokens
-    pub cached_tokens: i64,   // Cached input tokens (subset of input_tokens)
+    pub input_tokens: i64,            // Total input tokens
+    pub output_tokens: i64,           // Total output tokens
+    pub cached_tokens: i64,           // Cached input tokens (subset of input_tokens)
+    pub last_context_tokens: Option<i64>, // Context window fill from last main-chain message
 }
 ```
 
@@ -614,6 +625,7 @@ Tool output for non-patch `tool_result` entries is truncated to 10,000 bytes whe
 Configuration:
 - `AcpBackendConfig.cli_version`: CLI version included in session metadata
 - `AcpBackendConfig.default_model`: Default model to apply at session start (from config.toml [default_models])
+- `AcpBackendConfig.initial_context`: Optional string injected into `pending_compact_summary` at spawn time. Used by the TUI's `/fork` command to pass a plain-text conversation summary into a new ACP session, giving the agent prior context without a protocol-level session fork. When `None` (the default), `pending_compact_summary` starts empty as before. The same `pending_compact_summary` mechanism is shared by `/compact` and `/resume`.
 
 **Re-exported Types:**
 
@@ -765,6 +777,20 @@ Late-arriving tool events that race past the agent's final response are handled 
 | `Read` | `ParsedCommand::Read` | Exploring (compact, grouped) |
 | `Search` | `ParsedCommand::Search` | Exploring (compact, grouped) |
 | `Execute`, `Edit`, `Delete`, etc. | `ParsedCommand::Unknown` | Command (full display) |
+
+**Plan Event Translation:**
+
+ACP agents emit `SessionUpdate::Plan` events containing checklist/task entries. The `translate_session_update_to_events()` function in `event_translation.rs` maps these to `EventMsg::PlanUpdate(UpdatePlanArgs)`, enabling the TUI's existing `PlanUpdateCell` (in `@/codex-rs/tui/src/history_cell/mod.rs`) to render them as checkbox checklists.
+
+Each `acp::PlanEntry` is mapped to a `codex_protocol::plan_tool::PlanItemArg`:
+
+| ACP Field | Internal Field | Notes |
+|-----------|---------------|-------|
+| `PlanEntry.content` | `PlanItemArg.step` | Step description text |
+| `PlanEntry.status` | `PlanItemArg.status` | `Pending`/`InProgress`/`Completed` mapped 1:1; unknown variants default to `Pending` |
+| `PlanEntry.priority` | (dropped) | Not present in the internal `PlanItemArg` type |
+
+The simpler `translator.rs` `translate_session_update()` function (used only for text replay in its own module, not production event flow) still returns `vec![]` for Plan events since its `TranslatedEvent` enum only supports `TextDelta`/`Completed`.
 
 **Conversation Compaction:**
 
